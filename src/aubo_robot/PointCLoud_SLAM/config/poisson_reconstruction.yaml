@@ -1,0 +1,11 @@
+normal_estimation:
+  k_search: 20
+
+poisson:
+  depth: 8
+  solver_divide: 8
+  iso_divide: 8
+  point_weight: 4.0
+
+save_mesh: true
+mesh_output_dir: /tmp/tabletop_meshes

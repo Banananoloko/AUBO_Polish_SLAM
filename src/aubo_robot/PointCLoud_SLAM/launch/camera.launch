@@ -1,0 +1,15 @@
+<launch>
+  <!-- 按你的相机替换 -->
+  <!-- 示例：RealSense / Kinect / Orbbec 各自驱动 -->
+
+  <arg name="use_sim_time" default="false"/>
+  <param name="use_sim_time" value="$(arg use_sim_time)"/>
+
+  <!-- 占位：把这里替换成你的相机驱动 launch -->
+  <!--
+  <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+    <arg name="align_depth" value="true"/>
+    <arg name="pointcloud" value="true"/>
+  </include>
+  -->
+</launch>

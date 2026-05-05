@@ -1,0 +1,25 @@
+# Unity Shadow 模式调优参数
+# 用于修复实机静止时 Unity 小幅度抽搐的问题
+
+# 速度滤波系数 (0-1)
+# 值越大，对新速度的响应越快；值越小，平滑效果越强
+# 默认: 0.5 (从 0.3 增加以更强平滑)
+shadow_filter_alpha: 0.5
+
+# 位置死区 (弧度)
+# 当位置变化小于此值时，不发送指令到 Unity
+# 默认: 0.001 rad ≈ 0.057°
+# 可调范围: 0.0005 - 0.002 rad
+position_deadzone: 0.001
+
+# 速度阈值 (弧度/秒)
+# 当速度低于此值时，视为静止，不发送指令到 Unity
+# 默认: 0.005 rad/s ≈ 0.286°/s
+# 可调范围: 0.002 - 0.01 rad/s
+velocity_threshold: 0.005
+
+# 调优建议:
+# 1. 如果 Unity 仍然抽搐，增加 position_deadzone 到 0.002
+# 2. 如果 Unity 响应太慢，减小 position_deadzone 到 0.0005
+# 3. 如果需要更强的平滑，增加 shadow_filter_alpha 到 0.7
+# 4. 如果需要更快的响应，减小 shadow_filter_alpha 到 0.3

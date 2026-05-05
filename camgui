@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DATASET="/home/wuqz/aubo_polish/data/comatrix_scene"
+
+mkdir -p \
+  "${DATASET}/raw_clouds" \
+  "${DATASET}/metadata" \
+  "${DATASET}/processed_clouds" \
+  "${DATASET}/unity_export"
+
+test -f "${DATASET}/metadata/poses.csv" || printf '%s\n' \
+  'scan_id,cloud_file,timestamp,robot_j1_deg,robot_j2_deg,robot_j3_deg,robot_j4_deg,robot_j5_deg,robot_j6_deg,tcp_x_m,tcp_y_m,tcp_z_m,tcp_rx_rad,tcp_ry_rad,tcp_rz_rad,camera_x_m,camera_y_m,camera_z_m,camera_rx_rad,camera_ry_rad,camera_rz_rad,notes' \
+  > "${DATASET}/metadata/poses.csv"
+
+test -f "${DATASET}/metadata/capture_log.csv" || printf '%s\n' \
+  'scan_id,timestamp,action,result,cloud_file,distance_mm,exposure_or_params,operator_notes' \
+  > "${DATASET}/metadata/capture_log.csv"
+
+echo "============================================================"
+echo "COMATRIX Eagleye"
+echo "============================================================"
+echo "Save PointCloud to:"
+echo "  ${DATASET}/raw_clouds"
+echo
+echo "Record every scan in:"
+echo "  ${DATASET}/metadata/poses.csv"
+echo "  ${DATASET}/metadata/capture_log.csv"
+echo
+echo "Full guide:"
+echo "  ${DATASET}/README.md"
+echo
+echo "GUI sync reminder:"
+echo "  1. Click top COSD0511015 / 192.168.101.153 row."
+echo "  2. Click the left device info area."
+echo "  3. Connect only after both areas show the same real camera."
+echo "============================================================"
+echo
+
+QT_SCALE_FACTOR=1.75 QT_FONT_DPI=192 eagleye

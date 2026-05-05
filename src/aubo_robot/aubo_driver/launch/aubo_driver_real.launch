@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Minimal launch: only aubo_driver in /real namespace -->
+  <!-- For shadow mode: publishes /real/joint_states at 500Hz -->
+
+  <arg name="robot_ip" doc="IP address of the AUBO E5 robot controller"/>
+
+  <!-- Set the robot IP at the exact path aubo_driver reads -->
+  <param name="/aubo_driver/server_host" type="str" value="$(arg robot_ip)"/>
+
+  <!-- Launch aubo_driver in /real namespace, output=screen to see connection log -->
+  <group ns="real">
+    <node name="aubo_driver" pkg="aubo_driver" type="aubo_driver" output="screen"/>
+  </group>
+
+</launch>

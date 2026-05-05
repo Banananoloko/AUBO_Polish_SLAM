@@ -1,0 +1,25 @@
+name: "Circle Motion"
+description: "Draw a circle with 10cm radius"
+mode: cartesian
+
+cartesian_waypoints:
+  # 8 个点近似圆形
+  - position: {x: 0.4, y: 0.1, z: 0.5}
+    orientation: {x: 0.0, y: 0.707, z: 0.0, w: 0.707}
+  - position: {x: 0.4, y: 0.071, z: 0.571}
+    orientation: {x: 0.0, y: 0.707, z: 0.0, w: 0.707}
+  - position: {x: 0.4, y: 0.0, z: 0.6}
+    orientation: {x: 0.0, y: 0.707, z: 0.0, w: 0.707}
+  - position: {x: 0.4, y: -0.071, z: 0.571}
+    orientation: {x: 0.0, y: 0.707, z: 0.0, w: 0.707}
+  - position: {x: 0.4, y: -0.1, z: 0.5}
+    orientation: {x: 0.0, y: 0.707, z: 0.0, w: 0.707}
+  - position: {x: 0.4, y: -0.071, z: 0.429}
+    orientation: {x: 0.0, y: 0.707, z: 0.0, w: 0.707}
+  - position: {x: 0.4, y: 0.0, z: 0.4}
+    orientation: {x: 0.0, y: 0.707, z: 0.0, w: 0.707}
+  - position: {x: 0.4, y: 0.071, z: 0.429}
+    orientation: {x: 0.0, y: 0.707, z: 0.0, w: 0.707}
+  # 回到起点
+  - position: {x: 0.4, y: 0.1, z: 0.5}
+    orientation: {x: 0.0, y: 0.707, z: 0.0, w: 0.707}

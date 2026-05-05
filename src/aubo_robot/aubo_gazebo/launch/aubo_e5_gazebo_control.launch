@@ -1,0 +1,69 @@
+<launch>
+  <!-- 1.startup Gazebo -->
+  <arg name="paused" default="true"/>
+  <arg name="use_sim_time" default="true"/>
+  <arg name="gui" default="true"/>
+  <arg name="headless" default="false"/>
+  <arg name="debug" default="false"/>
+  <arg name="world_name" default="$(find aubo_gazebo)/worlds/aubo_e5.world"/>
+
+  <!-- Shadow mode: set to true to mirror a real robot.
+       When shadow:=true, aubo_gazebo_driver subscribes to /real/joint_states
+       (published by aubo_driver running in a separate terminal with ns:=real).
+       The sim is purely a read-only mirror — no commands flow back to the real robot. -->
+  <arg name="shadow" default="false"/>
+
+  <!-- We resume the logic in empty_world.launch -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="debug" value="$(arg debug)" />
+    <arg name="gui" value="$(arg gui)" />
+    <arg name="paused" value="$(arg paused)"/>
+    <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+    <arg name="headless" value="$(arg headless)"/>
+    <arg name="world_name" value="$(arg world_name)"/>
+    <arg name="extra_gazebo_args" value="--lockstep"/>
+  </include>
+
+  <!-- load robot URDF to parameter server -->
+  <param name="robot_description" command="$(find xacro)/xacro $(find aubo_gazebo)/urdf/aubo_e5.xacro" />
+
+  <!-- 2.Run a python script to the send a service call to gazebo_ros to spawn a URDF robot -->
+  <node name="urdf_spawner" pkg="gazebo_ros" type="spawn_model" respawn="false" output="screen"
+	args="-urdf -model arm -param robot_description
+	      -J shoulder_joint 0.0
+	      -J upperArm_joint 0.0
+	      -J foreArm_joint 0.0
+	      -J wrist1_joint 0.0
+	      -J wrist2_joint 0.0
+	      -J wrist3_joint 0.0"/>
+
+  <!-- 将Gazebo关节控制器的配置参数加载到参数服务器中 -->
+  <rosparam file="$(find aubo_gazebo)/config/aubo_e5_gazebo_control.yaml" command="load"/>
+  <!-- 设置robot_name供aubo_gazebo_driver构造话题 -->
+  <param name="/robot_name" value="/aubo_e5"/>
+
+  <!-- 加载控制器 -->
+  <node name="controller_spawner" pkg="controller_manager" type="spawner" respawn="false"
+        output="screen" ns="/aubo_e5"
+        args="joint_state_controller
+              shoulder_joint_position_controller
+              upperArm_joint_position_controller
+              foreArm_joint_position_controller
+              wrist1_joint_position_controller
+              wrist2_joint_position_controller
+              wrist3_joint_position_controller"/>
+
+  <!-- 发布 TF 树 -->
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" output="screen">
+    <remap from="joint_states" to="/aubo_e5/joint_states"/>
+  </node>
+
+  <!-- aubo_gazebo_driver:
+       shadow:=false (default) → subscribes to /joint_path_command, drives Gazebo joint controllers
+       shadow:=true            → mirrors /real/joint_states to Gazebo (one-way, no commands back) -->
+  <node name="aubo_gazebo_driver" pkg="aubo_driver" type="aubo_gazebo_driver" output="screen">
+    <param name="shadow" value="$(arg shadow)"/>
+    <param name="real_joint_states_topic" value="/real/joint_states"/>
+  </node>
+
+</launch>

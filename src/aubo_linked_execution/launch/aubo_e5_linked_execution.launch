@@ -1,0 +1,145 @@
+<launch>
+  <!-- ================================================================
+       aubo_e5_linked_execution.launch
+       RViz/MoveIt -> real robot execution + Gazebo mirror synchronization
+
+       sim_only:=false  联动模式：实机执行 + Gazebo 镜像同步
+       sim_only:=true   仿真模式：仅 Gazebo，标准 MoveIt 控制
+       ================================================================ -->
+
+  <arg name="robot_ip"  default="192.168.1.10" doc="IP address of the AUBO E5 real robot"/>
+  <arg name="sim_only"  default="false" doc="Set true to run sim+RViz without a real robot"/>
+  <arg name="use_unity" default="false" doc="Use Unity simulator instead of Gazebo"/>
+
+  <!-- A. MoveIt 基础层 -->
+  <include file="$(find aubo_e5_moveit_config)/launch/planning_context.launch">
+    <arg name="load_robot_description" value="true"/>
+  </include>
+
+  <!-- sim_only 模式：使用标准 aubo_e5 控制器（直连 Gazebo） -->
+  <include file="$(find aubo_e5_moveit_config)/launch/move_group.launch" if="$(arg sim_only)">
+    <arg name="publish_monitored_planning_scene" value="true"/>
+    <arg name="moveit_controller_manager" value="aubo_e5"/>
+  </include>
+
+  <!-- 联动模式：使用 linked_execution 控制器（经过聚合层） -->
+  <include file="$(find aubo_e5_moveit_config)/launch/move_group.launch" unless="$(arg sim_only)">
+    <arg name="publish_monitored_planning_scene" value="true"/>
+    <arg name="moveit_controller_manager" value="linked_execution"/>
+  </include>
+
+  <include file="$(find aubo_e5_moveit_config)/launch/moveit_rviz.launch">
+    <arg name="config" value="true"/>
+  </include>
+
+  <!-- B. 仿真层（二选一：Gazebo 或 Unity） -->
+
+  <!-- B.1 Gazebo 路径（默认） -->
+  <group unless="$(arg use_unity)">
+    <!-- sim_only: 普通模式（直接接收 /joint_path_command） -->
+    <include file="$(find aubo_gazebo)/launch/aubo_e5_gazebo_control.launch" if="$(arg sim_only)">
+      <arg name="shadow" value="false"/>
+      <arg name="paused" value="false"/>
+    </include>
+    <!-- 联动模式: shadow 模式（镜像 /real/joint_states） -->
+    <include file="$(find aubo_gazebo)/launch/aubo_e5_gazebo_control.launch" unless="$(arg sim_only)">
+      <arg name="shadow" value="true"/>
+      <arg name="paused" value="false"/>
+    </include>
+  </group>
+
+  <!-- B.2 Unity 路径（use_unity:=true） -->
+  <group if="$(arg use_unity)">
+    <include file="$(find aubo_unity_bridge)/launch/unity_bridge.launch" if="$(arg sim_only)">
+      <arg name="load_robot_description" value="false"/>
+      <arg name="shadow" value="false"/>
+      <arg name="with_action_server" value="false"/>
+    </include>
+    <include file="$(find aubo_unity_bridge)/launch/unity_bridge.launch" unless="$(arg sim_only)">
+      <arg name="load_robot_description" value="false"/>
+      <arg name="shadow" value="true"/>
+      <arg name="with_action_server" value="false"/>
+    </include>
+  </group>
+
+  <!-- C. 轨迹执行基础层 -->
+  <!-- /robot_name 必须在 Gazebo include 之后设置（覆盖 Gazebo 的 "/aubo_e5"） -->
+  <param name="/robot_name" value="aubo_e5"/>
+  <rosparam file="$(find aubo_e5_moveit_config)/config/joint_names.yaml" command="load"/>
+
+  <node pkg="aubo_controller" type="aubo_joint_trajectory_action"
+        name="aubo_joint_trajectory_action" output="screen"/>
+
+  <!-- sim_only：模拟器话题不隔离（它是唯一的 feedback 源） -->
+  <node if="$(arg sim_only)"
+        pkg="aubo_controller" type="aubo_robot_simulator"
+        name="aubo_robot_simulator" output="screen"/>
+
+  <!-- 联动模式：模拟器的 feedback_states / joint_states 重映射到隔离话题，
+       防止与 aubo_driver 的真实反馈混线。
+       aubo_joint_trajectory_action 只收到来自 aubo_driver 的真实 feedback，
+       确保 Execute 成功必须基于实机实际到位，而非本地模拟"喂成功"。 -->
+  <node unless="$(arg sim_only)"
+        pkg="aubo_controller" type="aubo_robot_simulator"
+        name="aubo_robot_simulator" output="screen">
+    <remap from="feedback_states" to="sim/feedback_states"/>
+    <remap from="joint_states" to="sim/joint_states"/>
+  </node>
+
+  <!-- D. 实机驱动层（仅联动模式） -->
+  <node unless="$(arg sim_only)"
+        pkg="aubo_driver" type="aubo_driver" name="aubo_driver" output="screen">
+    <param name="server_host" value="$(arg robot_ip)"/>
+  </node>
+
+  <!-- 实机上电和控制模式切换 -->
+  <node unless="$(arg sim_only)"
+        pkg="aubo_linked_execution" type="aubo_robot_startup.py"
+        name="aubo_robot_startup" output="screen">
+    <param name="startup_timeout" value="30.0"/>
+    <param name="position_alignment_tolerance" value="0.05"/>
+  </node>
+
+  <!-- 安全监控节点 -->
+  <node unless="$(arg sim_only)"
+        pkg="aubo_linked_execution" type="safety_monitor.py"
+        name="safety_monitor" output="screen">
+    <param name="large_motion_threshold" value="0.5"/>
+    <param name="trajectory_start_tolerance" value="0.15"/>
+    <param name="manual_movement_threshold" value="0.05"/>
+  </node>
+
+  <!-- Gazebo RTF 监控节点（仅 Gazebo 联动模式启用） -->
+  <node unless="$(eval arg('sim_only') or arg('use_unity'))"
+        pkg="aubo_linked_execution" type="gazebo_rtf_monitor.py"
+        name="gazebo_rtf_monitor" output="screen">
+    <param name="rtf_threshold_low" value="0.8"/>
+    <param name="rtf_threshold_high" value="1.2"/>
+    <param name="check_interval" value="2.0"/>
+  </node>
+
+  <!-- 不启动额外的 robot_state_publisher_real：
+       Gazebo launch 中已有 robot_state_publisher，
+       shadow 模式下它发布的 TF 已反映实机关节状态。 -->
+
+  <!-- E. 联动层（仅联动模式） -->
+  <node unless="$(arg sim_only)"
+        pkg="aubo_linked_execution" type="joint_state_mirror_adapter.py"
+        name="joint_state_mirror_adapter" output="screen"/>
+
+  <node unless="$(arg sim_only)"
+        pkg="aubo_linked_execution" type="linked_execution_monitor.py"
+        name="linked_execution_monitor" output="screen">
+    <param name="joint_tolerance" value="0.03"/>
+    <param name="success_cycles" value="3"/>
+    <param name="timeout_margin" value="2.0"/>
+  </node>
+
+  <node unless="$(arg sim_only)"
+        pkg="aubo_linked_execution" type="linked_execution_action_server.py"
+        name="linked_execution_action_server" output="screen">
+    <param name="real_server_wait_timeout" value="30.0"/>
+    <param name="safety_watchdog_timeout" value="5.0"/>
+  </node>
+
+</launch>

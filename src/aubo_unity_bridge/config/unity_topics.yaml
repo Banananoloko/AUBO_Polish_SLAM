@@ -1,0 +1,31 @@
+# Unity ↔ ROS 话题契约
+# Unity 端 ROSConnector 必须按此契约配置
+
+ros_to_unity:
+  joint_command:
+    topic: /unity/joint_command
+    type: sensor_msgs/JointState
+    direction: ROS_PUBLISH
+    description: 目标关节位置，Unity 端订阅后驱动 ArticulationBody
+
+unity_to_ros:
+  joint_states:
+    topic: /unity/joint_states
+    type: sensor_msgs/JointState
+    direction: UNITY_PUBLISH
+    rate_hz: 50
+    description: Unity 物理引擎当前关节状态，包含位置和速度
+
+# 关节顺序（必须与 URDF 一致）
+joint_names:
+  - shoulder_joint
+  - upperArm_joint
+  - foreArm_joint
+  - wrist1_joint
+  - wrist2_joint
+  - wrist3_joint
+
+# 收敛判定阈值
+monitor:
+  tolerance_rad: 0.03   # 1.7° ≈ 0.03 rad
+  timeout_sec: 15.0

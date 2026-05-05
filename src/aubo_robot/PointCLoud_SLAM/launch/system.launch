@@ -1,0 +1,5 @@
+<launch>
+  <include file="$(find PointCLoud_SLAM)/launch/camera.launch"/>
+  <include file="$(find PointCLoud_SLAM)/launch/mapping.launch"/>
+  <include file="$(find PointCLoud_SLAM)/launch/tabletop.launch"/>
+</launch>

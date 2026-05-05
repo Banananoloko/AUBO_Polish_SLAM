@@ -1,0 +1,21 @@
+<!-- mechmind_camera.launch -->
+<launch>
+  <!-- Start static transform publishers -->
+  <node pkg="tf2_ros" type="static_transform_publisher" name="static_tf1"
+    args="0 0 1 0 0 0 map /mechmind_camera/point_cloud" output="screen" />
+
+  <node pkg="tf2_ros" type="static_transform_publisher" name="static_tf2"
+    args="0 0 1 0 0 0 map /mechmind_camera/textured_point_cloud" output="screen" />
+
+  <!-- Start mechmind_camera_publisher_service -->
+  <node pkg="mecheye_ros_interface" type="start" name="mechmind_camera_publisher_service"
+    output="screen">
+    <param name="save_file" value="true" />      <!-- set true to enable save file -->
+    <param name="camera_ip" value="172.20.112.1" /> <!-- change to your camera ip -->
+    <param name="user_external_intri" value="false" />
+    <param name="fx" value="1727.4641025602748" />
+    <param name="fy" value="1727.4586926701952" />
+    <param name="u" value="655.8180825729554" />
+    <param name="v" value="516.6306500606158" />
+  </node>
+</launch>

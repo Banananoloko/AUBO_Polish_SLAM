@@ -1,0 +1,20 @@
+planners:
+  ompl:
+    default_algorithm: RRTConnect
+    planning_time: 5.0
+    num_planning_attempts: 10
+    algorithms:
+      - RRTConnect
+      - RRTstar
+      - PRM
+      - BKPIECE
+
+execution:
+  default_velocity_scaling: 0.5
+  default_acceleration_scaling: 0.5
+  goal_tolerance: 0.01
+
+validation:
+  check_joint_limits: true
+  check_velocity_limits: true
+  check_collision: true

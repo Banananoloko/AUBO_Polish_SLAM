@@ -1,0 +1,74 @@
+# ============================================================
+# Build artifacts
+# ============================================================
+build/
+devel/
+
+# ============================================================
+# Sensitive / Proprietary content
+# ============================================================
+
+# AUBO SDK (proprietary binaries)
+aubo_sdk-*/
+aubo_sdk*.zip
+
+# AUBO driver proprietary libraries
+src/aubo_robot/aubo_driver/lib/
+src/aubo_robot/opt/
+src/aubo_robot/UpdateMoveitLib/
+
+# Personal archives and data
+wqz.zip
+wqz/
+
+# Camera calibration data
+data/
+
+# Diagnostic logs
+diagnostic_logs/
+
+# Unity import assets (contains external project files)
+codex_unity_import/
+
+# Project report (internal)
+项目汇报总结.md
+
+# OpenSpec plans
+openspec/
+
+# ============================================================
+# Local config
+# ============================================================
+.claude/
+.codex
+.catkin_tools/
+
+# ============================================================
+# Nested git repos (converted to regular directories)
+# ============================================================
+src/ROS-TCP-Endpoint/.git/
+src/mecheye_ros_interface/.git/
+
+# ============================================================
+# Editor / IDE
+# ============================================================
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.bak
+
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+
+# ============================================================
+# OS generated
+# ============================================================
+.DS_Store
+Thumbs.db

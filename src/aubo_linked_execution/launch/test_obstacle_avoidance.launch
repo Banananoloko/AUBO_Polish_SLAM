@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- 避障测试系统启动文件 -->
+
+  <!-- 启动基础系统（仿真模式） -->
+  <include file="$(find aubo_linked_execution)/launch/aubo_e5_linked_execution.launch">
+    <arg name="sim_only" value="true"/>
+  </include>
+
+  <!-- 障碍物生成节点 -->
+  <node pkg="aubo_linked_execution" type="obstacle_spawner.py"
+        name="obstacle_spawner" output="screen">
+    <!-- 工作空间参数 -->
+    <param name="workspace_x_min" value="0.2"/>
+    <param name="workspace_x_max" value="0.6"/>
+    <param name="workspace_y_min" value="-0.4"/>
+    <param name="workspace_y_max" value="0.4"/>
+    <param name="workspace_z_min" value="0.1"/>
+    <param name="workspace_z_max" value="0.5"/>
+  </node>
+
+  <!-- 可选：自动启动测试（默认不启动） -->
+  <!-- 取消注释以启用自动测试 -->
+  <!--
+  <node pkg="aubo_linked_execution" type="test_obstacle_avoidance.py"
+        name="test_obstacle_avoidance" output="screen"
+        launch-prefix="bash -c 'sleep 15; $0 $@' "/>
+  -->
+
+</launch>

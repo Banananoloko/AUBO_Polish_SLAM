@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>aubo_linked_execution</name>
+  <version>0.1.0</version>
+  <description>
+    RViz/MoveIt to real robot execution with Gazebo mirror synchronization.
+    Provides a linked execution action server that drives the real AUBO E5 and
+    mirrors its motion in Gazebo simultaneously.
+  </description>
+  <maintainer email="user@example.com">user</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>control_msgs</depend>
+  <depend>trajectory_msgs</depend>
+  <depend>actionlib</depend>
+  <depend>actionlib_msgs</depend>
+</package>

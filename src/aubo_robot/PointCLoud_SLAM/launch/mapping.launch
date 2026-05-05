@@ -1,0 +1,21 @@
+<launch>
+  <arg name="rtabmap_args" default="--delete_db_on_start"/>
+  <arg name="rviz" default="false"/>
+
+  <!-- 你若用 apt 装的 rtabmap_ros，这里直接 find 包 -->
+  <node pkg="rtabmap_ros" type="rgbd_sync" name="rgbd_sync" output="screen">
+    <remap from="rgb/image"       to="/camera/color/image_raw"/>
+    <remap from="depth/image"     to="/camera/aligned_depth_to_color/image_raw"/>
+    <remap from="rgb/camera_info" to="/camera/color/camera_info"/>
+    <param name="approx_sync" value="true"/>
+  </node>
+
+  <node pkg="rtabmap_ros" type="rtabmap" name="rtabmap" output="screen" args="$(arg rtabmap_args)">
+    <remap from="rgb/image"       to="/camera/color/image_raw"/>
+    <remap from="depth/image"     to="/camera/aligned_depth_to_color/image_raw"/>
+    <remap from="rgb/camera_info" to="/camera/color/camera_info"/>
+    <param name="subscribe_depth" value="true"/>
+    <param name="subscribe_rgbd"  value="false"/>
+    <rosparam command="load" file="$(find PointCLoud_SLAM)/config/rtabmap_rgbd_params.yaml"/>
+  </node>
+</launch>

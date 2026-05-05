@@ -1,0 +1,18 @@
+<launch>
+  <node pkg="PointCLoud_SLAM"
+        type="tabletop_segmentation_node"
+        name="tabletop_segmentation_node"
+        output="screen">
+    <!-- 初期建议直接吃实时点云 -->
+    <remap from="/input_cloud" to="/camera/depth/color/points"/>
+    <rosparam command="load" file="$(find PointCLoud_SLAM)/config/tabletop_segmentation.yaml"/>
+  </node>
+
+  <node pkg="PointCLoud_SLAM"
+        type="poisson_reconstruction_node"
+        name="poisson_reconstruction_node"
+        output="screen">
+    <remap from="/input_clusters" to="/tabletop/clusters"/>
+    <rosparam command="load" file="$(find PointCLoud_SLAM)/config/poisson_reconstruction.yaml"/>
+  </node>
+</launch>

@@ -1,0 +1,16 @@
+03/24/2026 12:23:22,105 [139761560684480] [INFO ] - log4cplus started.
+03/24/2026 12:23:22,105 [139761560684480] [INFO ] - sdk log: Connect robot server success.
+03/24/2026 12:23:22,125 [139761560684480] [INFO ] - sdk log: set dhparam success. type:0, DhParam:0.408000,0.376000,0.098500,0.121500,0.102500,0.094000
+03/24/2026 12:23:22,125 [139761560684480] [INFO ] - sdk log: login  success.
+03/24/2026 12:23:22,132 [139761560684480] [INFO ] - sdk log: disenable joint6 360.
+03/24/2026 12:23:22,132 [139761560684480] [INFO ] - sdk log: login completed, set joint6 retate 360 falg success. joint6Rot360Enable=0
+03/24/2026 12:23:24,774 [139761560684480] [INFO ] - sdk log: User blocking call motion interface.
+03/24/2026 12:23:24,775 [139761560684480] [INFO ] - sdk log: Ready to send a motion request.
+03/24/2026 12:23:24,775 [139761560684480] [INFO ] - sdk log: Sending robotMove request was successful, waiting for server response.
+03/24/2026 12:23:24,786 [139761314424576] [INFO ] - sdk log: disenable joint6 360.
+03/24/2026 12:23:24,786 [139761314424576] [INFO ] - sdk log: init ik param success.
+03/24/2026 12:23:24,830 [139761314424576] [INFO ] - sdk log: Processing the robotMove response from the server..
+03/24/2026 12:23:24,831 [139761560684480] [INFO ] - sdk log: Successfully waited for a robotMove response from the server.
+03/24/2026 12:23:28,859 [139761314424576] [INFO ] - sdk log: RobotEvent_atTrackTargetPos processing.
+03/24/2026 12:23:28,860 [139761560684480] [INFO ] - sdk log: Success wait for the signal to arrive target positon.
+03/24/2026 12:23:28,860 [139761560684480] [INFO ] - sdk log: User call motion interface finish.

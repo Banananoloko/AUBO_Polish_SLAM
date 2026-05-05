@@ -1,0 +1,79 @@
+digraph aubo_pipeline {
+    rankdir=TB;
+    node [shape=box, style=rounded];
+
+    // 用户交互层
+    subgraph cluster_user {
+        label="用户交互层";
+        style=filled;
+        color=lightblue;
+
+        RViz [label="RViz\n可视化界面", shape=box3d];
+        MoveIt [label="MoveIt\n路径规划器"];
+    }
+
+    // 联动聚合层
+    subgraph cluster_aggregation {
+        label="联动聚合层 (aubo_linked_execution)";
+        style=filled;
+        color=lightgreen;
+
+        ActionServer [label="linked_execution\n_action_server.py\n聚合协调中枢"];
+        Monitor [label="linked_execution\n_monitor.py\nGazebo收敛监视"];
+        Adapter [label="joint_state\n_mirror_adapter.py\n关节状态重排"];
+        Startup [label="aubo_robot\n_startup.py\n实机自动上电"];
+    }
+
+    // 实机执行链
+    subgraph cluster_real {
+        label="实机执行链 (aubo_robot)";
+        style=filled;
+        color=lightyellow;
+
+        JTA [label="aubo_joint\n_trajectory_action\nAction Server"];
+        Simulator [label="aubo_robot\n_simulator.py\n轨迹插补桥"];
+        Driver [label="aubo_driver\nAUBO SDK 500Hz"];
+        Robot [label="AUBO E5\n实体机器人", shape=cylinder, color=orange];
+    }
+
+    // Gazebo 镜像链
+    subgraph cluster_gazebo {
+        label="Gazebo 镜像链 (aubo_gazebo)";
+        style=filled;
+        color=lightcyan;
+
+        GazeboDriver [label="aubo_gazebo_driver\n(shadow模式)"];
+        Controllers [label="6个单关节\n位置控制器"];
+        GazeboPhysics [label="Gazebo\nPhysics Engine", shape=cylinder, color=lightgray];
+    }
+
+    // 数据流
+    RViz -> MoveIt [label="设置目标"];
+    MoveIt -> ActionServer [label="FollowJointTrajectory\nGoal"];
+
+    ActionServer -> JTA [label="转发Goal"];
+    ActionServer -> Monitor [label="发布终点\n/monitor_goal"];
+
+    JTA -> Simulator [label="/joint_path_command\nJointTrajectory"];
+    Simulator -> Driver [label="/moveItController_cmd\nJointTrajectoryPoint"];
+    Driver -> Robot [label="AUBO SDK\n关节位置指令"];
+
+    Robot -> Driver [label="关节状态反馈"];
+    Driver -> Adapter [label="/joint_states"];
+    Driver -> JTA [label="/feedback_states"];
+    Driver -> Startup [label="/robot_status"];
+
+    Adapter -> GazeboDriver [label="/real/joint_states\n(固定顺序)"];
+    GazeboDriver -> Controllers [label="位置指令"];
+    Controllers -> GazeboPhysics [label="力矩控制"];
+
+    GazeboPhysics -> Monitor [label="/aubo_e5/joint_states"];
+    Monitor -> ActionServer [label="/monitor_status\nSUCCEEDED/FAILED"];
+
+    JTA -> ActionServer [label="实机执行结果"];
+    ActionServer -> MoveIt [label="双重成功确认"];
+    MoveIt -> RViz [label="显示执行状态"];
+
+    // 启动流程
+    Startup -> Driver [label="powerOn +\n控制模式切换", style=dashed, color=red];
+}

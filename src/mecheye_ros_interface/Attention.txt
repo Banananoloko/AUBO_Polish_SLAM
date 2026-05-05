@@ -1,0 +1,51 @@
+● 你的环境状态很好：                                                            
+                                                                                
+  - Mech-Eye SDK 2.5.4 已安装，库路径已配置，pkg-config 可用                    
+  - ROS Noetic 已安装                                                         
+  - SDK 位于 /opt/mech-mind/mech-eye-sdk/                                       
+                                                                                
+  但这个 SDK 本身只是 C++ API，不包含 ROS 封装。要在 ROS 中使用，你需要 MechMind
+   官方的 ROS 接口包。                                                          
+                                                                                
+  使用步骤                                                                      
+                                                                                
+  1. 安装依赖                                                                   
+                                                                              
+  sudo apt-get install ros-noetic-cv-bridge ros-noetic-pcl-ros                  
+  ros-noetic-image-transport                                                    
+                                                                                
+  2. 克隆官方 ROS 接口到你的 catkin 工作空间                                    
+                                                                              
+  # 如果还没有 catkin workspace                                                 
+  mkdir -p ~/catkin_ws/src && cd ~/catkin_ws/src                                
+                                                                                
+  # 克隆 MechMind 官方 ROS 接口（注意选择与 SDK 2.5.x 匹配的分支）              
+  git clone https://github.com/MechMindRobotics/mecheye_ros_interface.git       
+                                                                                
+  3. 编译                                                                     
+                                                                                
+  cd ~/catkin_ws                                                                
+  catkin_make
+  source devel/setup.bash                                                       
+                                                                                
+  4. 启动相机节点                                                               
+                                                                                
+  # 先确保相机通过网线连接，且网段配置正确                                      
+  roslaunch mecheye_ros_interface start_camera.launch                           
+                                                                                
+  启动后会发布标准 ROS topic，包括：                                            
+  - /mechmind/color_image — 2D 彩色图                                           
+  - /mechmind/depth_image — 深度图                                              
+  - /mechmind/point_cloud — 点云                                              
+  - /mechmind/camera_info — 相机内参                                            
+                                                                                
+  你可以用 rviz 直接可视化，或在自己的节点中订阅这些 topic。                    
+                                                                                
+  网络配置提醒                                                                  
+                                                                                
+  Mech-Eye 相机默认 IP 通常是 192.168.x.x                                       
+  网段，确保你的网卡和相机在同一子网。可以用 SDK 自带的 IP 配置工具检查：     
+                                                                                
+  sudo /opt/mech-mind/mech-eye-sdk/bin/ip_configurator                        
+                                                                                
+  你现在相机已经连上了吗？还是先搭环境？ 

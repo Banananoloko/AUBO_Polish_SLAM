@@ -1,0 +1,115 @@
+<?xml version="1.0"?>
+<!--
+  Unity Bridge 主启动文件（替代 aubo_e5_gazebo_control.launch）
+
+  对标 Gazebo 端组件：
+    - robot_state_publisher          → robot_state_publisher（不变）
+    - aubo_gazebo_driver (normal)    → unity_command_forwarder.py (mode=normal)
+    - aubo_gazebo_driver (shadow)    → unity_command_forwarder.py (mode=shadow)
+    - joint_state_controller (Gz)    → unity_joint_states_publisher.py
+    - linked_execution_monitor       → unity_execution_monitor.py
+
+  参数：
+    shadow:=true    启用实机镜像模式（联动用），订阅 /real/joint_states
+    shadow:=false   启用纯仿真模式，订阅 /joint_path_command
+    use_fake:=true  暂不连接 Unity 时使用假关节发布器（联调链路用）
+-->
+<launch>
+    <arg name="shadow"      default="false"/>
+    <arg name="use_fake"    default="false"/>
+    <arg name="tcp_ip"      default="0.0.0.0"/>
+    <arg name="tcp_port"    default="10000"/>
+    <arg name="robot_urdf" default="$(find aubo_description)/urdf/aubo_e5.urdf"/>
+    <arg name="load_robot_description" default="true"
+         doc="设为 false 时跳过加载 robot_description（被父 launch 包含时使用）"/>
+    <arg name="with_action_server" default="$(eval not arg('shadow'))"
+         doc="是否在本 launch 内启动 aubo_joint_trajectory_action + aubo_robot_simulator
+              （独立 + MoveIt 测试时为 true；被 aubo_e5_linked_execution.launch 包含时设 false）"/>
+
+    <!-- Unity Shadow 模式调优参数（修复实机静止时抽搐问题） -->
+    <arg name="position_deadzone"    default="0.001" doc="位置死区 (rad)，低于此值不发送指令"/>
+    <arg name="velocity_threshold"   default="0.005" doc="速度阈值 (rad/s)，低于此值视为静止"/>
+    <arg name="shadow_filter_alpha"  default="0.5"   doc="Shadow 模式速度滤波系数 (0-1)"/>
+
+    <!-- 1. 加载机器人模型（直接用纯 URDF，避开 xacro 引用 your_robot_description 的 bug） -->
+    <param if="$(arg load_robot_description)"
+           name="robot_description" textfile="$(arg robot_urdf)"/>
+
+    <!-- 2. TF 发布器（与 Gazebo 端完全相同） -->
+    <node pkg="robot_state_publisher" type="robot_state_publisher"
+          name="robot_state_publisher" output="screen">
+        <remap from="joint_states" to="/aubo_e5/joint_states"/>
+    </node>
+
+    <!-- 2.1 话题重映射：/aubo_e5/joint_states -> /joint_states (MoveIt 需要) -->
+    <node pkg="topic_tools" type="relay" name="joint_states_relay"
+          args="/aubo_e5/joint_states /joint_states" output="screen"/>
+
+    <!-- 3. ROS-Unity TCP 桥 -->
+    <include file="$(find ros_tcp_endpoint)/launch/endpoint.launch">
+        <arg name="tcp_ip"   value="$(arg tcp_ip)"/>
+        <arg name="tcp_port" value="$(arg tcp_port)"/>
+    </include>
+
+    <!-- 4. Unity → ROS：关节状态转发 -->
+    <node pkg="aubo_unity_bridge" type="unity_joint_states_publisher.py"
+          name="unity_joint_states_publisher" output="screen">
+        <param name="input_topic"  value="/unity/joint_states"/>
+        <param name="output_topic" value="/aubo_e5/joint_states"/>
+        <param name="restamp"      value="true"/>
+    </node>
+
+    <!-- 5. ROS → Unity：指令转发 -->
+    <node pkg="aubo_unity_bridge" type="unity_command_forwarder.py"
+          name="unity_command_forwarder" output="screen">
+        <param name="mode"            value="$(eval 'shadow' if shadow else 'normal')"/>
+        <param name="unity_cmd_topic" value="/unity/joint_command"/>
+        <param name="shadow_input"    value="/real/joint_states"/>
+        <param name="normal_input"    value="/joint_path_command"/>
+
+        <!-- Unity 运动速度优化参数 -->
+        <param name="max_joint_velocity"    value="0.5"/>   <!-- rad/s，匹配实机速度 -->
+        <param name="shadow_filter_alpha"   value="$(arg shadow_filter_alpha)"/>   <!-- Shadow mode 平滑滤波系数 (0-1) -->
+        <param name="enable_velocity_limit" value="true"/>  <!-- 是否启用速度限制 -->
+
+        <!-- Unity Shadow 模式抽搐修复参数 -->
+        <param name="position_deadzone"     value="$(arg position_deadzone)"/>    <!-- 位置死区 (rad) -->
+        <param name="velocity_threshold"    value="$(arg velocity_threshold)"/>   <!-- 速度阈值 (rad/s) -->
+    </node>
+
+    <!-- 6. Unity 收敛监控（用于联动层 SUCCESS 判定） -->
+    <node pkg="aubo_unity_bridge" type="unity_execution_monitor.py"
+          name="unity_execution_monitor" output="screen">
+        <param name="tolerance"        value="0.15"/>  <!-- 从 0.03 增加到 0.15 rad (8.6°) -->
+        <param name="timeout_sec"      value="8.0"/>   <!-- 从 15.0 降低到 8.0 秒 -->
+        <param name="sim_joint_states" value="/aubo_e5/joint_states"/>
+    </node>
+
+    <!-- 7. 可选：假关节发布器（Unity 未启动时用于联调 ROS 链路） -->
+    <node if="$(arg use_fake)"
+          pkg="aubo_unity_bridge" type="fake_aubo_joint_states.py"
+          name="fake_aubo_joint_states" output="screen"/>
+
+    <!-- 8. 独立 + MoveIt 模式所需的轨迹动作服务器与模拟器
+         （MoveIt 的 controllers.yaml 期望 aubo_e5_controller/follow_joint_trajectory；
+           aubo_joint_trajectory_action 提供该动作并发布 /joint_path_command；
+           aubo_robot_simulator 订阅 /aubo_e5/joint_states（Unity 真实物理状态），
+           发布 /feedback_states 反映 Unity 实际位置，避免 MoveIt 超时。
+           always_sync_external=true 让 simulator 总是跟踪 Unity 状态而非内部插值。） -->
+    <group if="$(arg with_action_server)">
+        <param name="/robot_name" value="aubo_e5"/>
+        <rosparam file="$(find aubo_e5_moveit_config)/config/joint_names.yaml" command="load"/>
+
+        <node pkg="aubo_controller" type="aubo_joint_trajectory_action"
+              name="aubo_joint_trajectory_action" output="screen">
+            <!-- P4 Unity 修复：大幅放宽收敛容差以应对网络延迟 -->
+            <!-- 从 0.002 rad (0.11°) 增加到 0.15 rad (8.59°) -->
+            <param name="constraints/goal_threshold" value="0.15"/>
+        </node>
+
+        <node pkg="aubo_controller" type="aubo_robot_simulator"
+              name="aubo_robot_simulator" output="screen">
+            <param name="always_sync_external" value="true"/>
+        </node>
+    </group>
+</launch>

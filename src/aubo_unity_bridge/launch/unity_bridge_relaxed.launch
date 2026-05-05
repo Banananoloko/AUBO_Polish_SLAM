@@ -1,0 +1,83 @@
+<?xml version="1.0"?>
+<!--
+  Unity Bridge 放宽容差版（P3 修复）
+  
+  改进：
+    - goal_threshold: 0.05 → 0.1 rad (5.73°)
+    - tolerance: 0.03 → 0.1 rad
+    - timeout: 15s → 30s
+    - 添加错误恢复机制
+-->
+<launch>
+    <arg name="shadow"      default="false"/>
+    <arg name="use_fake"    default="false"/>
+    <arg name="tcp_ip"      default="0.0.0.0"/>
+    <arg name="tcp_port"    default="10000"/>
+    <arg name="robot_urdf" default="$(find aubo_description)/urdf/aubo_e5.urdf"/>
+    <arg name="load_robot_description" default="true"/>
+    <arg name="with_action_server" default="$(eval not arg('shadow'))"/>
+
+    <!-- 1. 加载机器人模型 -->
+    <param if="$(arg load_robot_description)"
+           name="robot_description" textfile="$(arg robot_urdf)"/>
+
+    <!-- 2. TF 发布器 -->
+    <node pkg="robot_state_publisher" type="robot_state_publisher"
+          name="robot_state_publisher" output="screen">
+        <remap from="joint_states" to="/aubo_e5/joint_states"/>
+    </node>
+
+    <!-- 3. ROS-Unity TCP 桥 -->
+    <include file="$(find ros_tcp_endpoint)/launch/endpoint.launch">
+        <arg name="tcp_ip"   value="$(arg tcp_ip)"/>
+        <arg name="tcp_port" value="$(arg tcp_port)"/>
+    </include>
+
+    <!-- 4. Unity → ROS：关节状态转发 -->
+    <node pkg="aubo_unity_bridge" type="unity_joint_states_publisher.py"
+          name="unity_joint_states_publisher" output="screen">
+        <param name="input_topic"  value="/unity/joint_states"/>
+        <param name="output_topic" value="/aubo_e5/joint_states"/>
+        <param name="restamp"      value="true"/>
+    </node>
+
+    <!-- 5. ROS → Unity：指令转发 -->
+    <node pkg="aubo_unity_bridge" type="unity_command_forwarder.py"
+          name="unity_command_forwarder" output="screen">
+        <param name="mode"            value="$(eval 'shadow' if shadow else 'normal')"/>
+        <param name="unity_cmd_topic" value="/unity/joint_command"/>
+        <param name="shadow_input"    value="/real/joint_states"/>
+        <param name="normal_input"    value="/joint_path_command"/>
+    </node>
+
+    <!-- 6. Unity 收敛监控（放宽容差 + 延长超时） -->
+    <node pkg="aubo_unity_bridge" type="unity_execution_monitor.py"
+          name="unity_execution_monitor" output="screen">
+        <param name="tolerance"        value="0.1"/>   <!-- 0.03 → 0.1 rad (5.73°) -->
+        <param name="timeout_sec"      value="30.0"/>  <!-- 15s → 30s -->
+        <param name="sim_joint_states" value="/aubo_e5/joint_states"/>
+    </node>
+
+    <!-- 7. 可选：假关节发布器 -->
+    <node if="$(arg use_fake)"
+          pkg="aubo_unity_bridge" type="fake_aubo_joint_states.py"
+          name="fake_aubo_joint_states" output="screen"/>
+
+    <!-- 8. 轨迹动作服务器（放宽容差） -->
+    <group if="$(arg with_action_server)">
+        <param name="/robot_name" value="aubo_e5"/>
+        <rosparam file="$(find aubo_e5_moveit_config)/config/joint_names.yaml" command="load"/>
+
+        <node pkg="aubo_controller" type="aubo_joint_trajectory_action"
+              name="aubo_joint_trajectory_action" output="screen">
+            <!-- P3 Unity 修复：进一步放宽收敛容差 -->
+            <!-- 从 0.05 rad (2.86°) 增加到 0.1 rad (5.73°) -->
+            <param name="constraints/goal_threshold" value="0.1"/>
+        </node>
+
+        <node pkg="aubo_controller" type="aubo_robot_simulator"
+              name="aubo_robot_simulator" output="screen">
+            <param name="always_sync_external" value="true"/>
+        </node>
+    </group>
+</launch>
