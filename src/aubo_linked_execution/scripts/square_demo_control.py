@@ -49,10 +49,11 @@ SQUARE_CORNERS = [
 ]
 
 # ---- 运动参数 ----
-# 速度/加速度由 joint_limits.yaml 硬限制在硬件 ~40%（1.0/1.25 rad/s）
-# 此处 scaling 进一步从 MoveIt 层面降速
-VELOCITY_SCALING = 0.5
-ACCEL_SCALING    = 0.5
+# joint_limits.yaml 已将 ITP 速度硬限制在 ~24% HW（0.5/0.6 rad/s）
+# 此处 scaling 保持全速通过，不再二次降速。
+# 有效速度: 0.5 × 1.0 × 0.5(velocity_scale_factor) × 2.5(timing) = 0.625 rad/s (~24% HW)
+VELOCITY_SCALING = 1.0
+ACCEL_SCALING    = 1.0
 EEF_STEP         = 0.005        # 笛卡尔路径步长 5mm
 PLANNING_TIME    = 10.0
 GOAL_POS_TOL     = 0.01         # 1cm

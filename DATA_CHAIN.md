@@ -136,10 +136,10 @@ set_pose_target(pose)
 
 | 关节 | 硬件上限 | 配置值 | 百分比 |
 |------|---------|--------|--------|
-| shoulder / upperArm / foreArm 速度 | 2.596 rad/s | **1.0 rad/s** | ~38% |
-| wrist1 / wrist2 / wrist3 速度 | 3.110 rad/s | **1.25 rad/s** | ~40% |
-| shoulder / upperArm / foreArm 加速度 | 17.309 rad/s² | **7.0 rad/s²** | ~40% |
-| wrist1 / wrist2 / wrist3 加速度 | 20.737 rad/s² | **8.3 rad/s²** | ~40% |
+| shoulder / upperArm / foreArm 速度 | 2.596 rad/s | **0.5 rad/s** | ~19% |
+| wrist1 / wrist2 / wrist3 速度 | 3.110 rad/s | **0.6 rad/s** | ~19% |
+| shoulder / upperArm / foreArm 加速度 | 17.309 rad/s² | **3.5 rad/s²** | ~20% |
+| wrist1 / wrist2 / wrist3 加速度 | 20.737 rad/s² | **4.0 rad/s²** | ~19% |
 
 ### 第 3 层：联动执行 Action Server
 
@@ -157,7 +157,7 @@ MoveIt 发出 FollowJointTrajectoryGoal
   │
   ├─ 3. 等待实机 Action 返回 (timeout = trajectory_duration + 10s)
   │
-  └─ 4. 等待 Gazebo 收敛 (timeout = trajectory_duration + 8s)
+  └─ 4. 等待 Gazebo 收敛 (timeout = trajectory_duration + 8s, 软警告 — 超时不阻断)
 ```
 
 ### 第 4 层：C++ Joint Trajectory Action
@@ -312,10 +312,10 @@ robotServiceSetRobotPosData2Canbus(wayPointVector)
 
 | 层 | 位置 | 参数 | 当前值 | 相对 HW |
 |----|------|------|--------|---------|
-| 1 | joint_limits.yaml | max_velocity | 1.0/1.25 rad/s | ~40% |
-| 1 | joint_limits.yaml | max_acceleration | 7.0/8.3 rad/s² | ~40% |
-| 2 | square_demo_control.py | VELOCITY_SCALING | 0.5 | ×0.5 |
-| 2 | square_demo_control.py | ACCEL_SCALING | 0.5 | ×0.5 |
+| 1 | joint_limits.yaml | max_velocity | 0.5/0.6 rad/s | ~19% |
+| 1 | joint_limits.yaml | max_acceleration | 3.5/4.0 rad/s² | ~20% |
+| 2 | square_demo_control.py | VELOCITY_SCALING | 1.0 | ×1.0 |
+| 2 | square_demo_control.py | ACCEL_SCALING | 1.0 | ×1.0 |
 | 3 | aubo_e5_linked_execution.launch | /aubo_controller/velocity_scale_factor | 0.5 | ×0.5 |
 | 4 | aubo_driver.cpp | MaxVelc (tryPopWaypoint 检查) | 2.596/3.110 rad/s | 100% |
 | 4 | aubo_driver.cpp | MaxAcc (tryPopWaypoint 检查) | 17.3/20.7 rad/s² | 100% |
@@ -324,21 +324,14 @@ robotServiceSetRobotPosData2Canbus(wayPointVector)
 | 5 | aubo_driver.h | JMAX (OTG 电机加加速度) | 20000 | 50% |
 | 6 | 示教器 | 安全速度限幅 | 用户设定 | 未知 |
 
-**有效速度计算 (square_demo 路径)**:
+**有效速度计算 (统一，joint_limits 作为唯一安全上限)**:
 
 ```
-实机速度 ≈ joint_limits_vel × VELOCITY_SCALING × velocity_scale_factor
-            × (5ms / T_robot)
-         = 1.0 × 0.5 × 0.5 × 2.5
-         = 0.625 rad/s  (24% HW)
+RViz 路径:       limits_vel × 1.0 × 0.5 × 2.5  = 0.5 × 0.5 × 2.5 = 0.625 rad/s (24% HW)
+Square Demo 路径: limits_vel × 1.0 × 0.5 × 2.5  = 0.5 × 0.5 × 2.5 = 0.625 rad/s (24% HW)
 ```
 
-**有效速度计算 (RViz 路径，无 VELOCITY_SCALING)**:
-
-```
-实机速度 ≈ 1.0 × 1.0 × 0.5 × 2.5
-         = 1.25 rad/s  (48% HW)
-```
+两条路径统一达到 ~24% HW，不再存 RViz 路径速度翻倍的问题。
 
 ---
 
@@ -375,6 +368,14 @@ robotServiceSetRobotPosData2Canbus(wayPointVector)
 
 - **原因**: 原 verify_arrival 用轮询超时等待 (最多 5s)，已通过 go() 确认到达后仍额外等待
 - **修复**: 改为单次 FK 采样校验 (go() 已通过 C++ action + in_motion + Gazebo monitor 三层确认)
+
+### B7: RViz Plan&Execute 速度超限 + 虚假 "failed"
+
+- **原因**: RViz Plan&Execute 路径不经过 `square_demo_control.py`，缺少 VELOCITY_SCALING=0.5，ITP 速度是 square_demo 的 2 倍（1.0 vs 0.5 rad/s）。实机速度 1.25 rad/s (48% HW) 触发 tryPopWaypoint 速度超限和/或机器人保护性停止，导致 C++ Action abort。
+- **症状**: RViz 拖拽末端执行 Plan&Execute → 实机能运动到目标附近但 RViz 显示 "failed"；终端出现 "Joint X velocity exceeds limit" 警告
+- **修复1**: `joint_limits.yaml` 速度降为 0.5/0.6 rad/s (~19% HW)，作为所有路径的统一安全上限，不再依赖各路径分别降速
+- **修复2**: `square_demo_control.py` VELOCITY_SCALING 从 0.5 提升到 1.0，补偿 joint_limits 的降低，保持用户体验不变
+- **修复3**: `linked_execution_action_server.py` Gazebo 收敛检查改为软警告 — 实机成功即返回 SUCCESS，Gazebo 超时仅记录 WARN 不 abort。消除 Gazebo 镜像延迟导致的虚假失败
 
 ---
 

@@ -148,20 +148,18 @@ class LinkedExecutionActionServer(object):
 
         rospy.loginfo('LinkedExecutionActionServer: real robot SUCCEEDED, waiting for Gazebo...')
 
-        # 5. Wait for Gazebo to converge
+        # 5. Wait for Gazebo to converge (advisory only — real robot success is what matters)
         gazebo_timeout = rospy.Duration(duration_secs + GAZEBO_WAIT_EXTRA)
         gazebo_ok = self._wait_for_gazebo(gazebo_timeout)
 
         self._monitor_control_pub.publish(String(data='RESET'))
 
         if not gazebo_ok:
-            rospy.logwarn('LinkedExecutionActionServer: Gazebo did not converge — aborting')
-            result = FollowJointTrajectoryResult()
-            result.error_code = FollowJointTrajectoryResult.GOAL_TOLERANCE_VIOLATED
-            self._server.set_aborted(result, 'Gazebo mirror did not converge')
-            return
+            rospy.logwarn('LinkedExecutionActionServer: Gazebo did not converge — '
+                          'proceeding with real robot success only (advisory warning)')
 
-        rospy.loginfo('LinkedExecutionActionServer: both real and Gazebo SUCCEEDED')
+        rospy.loginfo('LinkedExecutionActionServer: real robot SUCCEEDED, Gazebo %s',
+                      'OK' if gazebo_ok else 'TIMEOUT (ignored)')
         self._server.set_succeeded(real_result if real_result else FollowJointTrajectoryResult())
 
     # ------------------------------------------------------------------
