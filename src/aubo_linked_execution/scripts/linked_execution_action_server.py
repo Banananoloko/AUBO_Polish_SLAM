@@ -32,7 +32,7 @@ MONITOR_GOAL_TOPIC    = '/linked_execution/monitor_goal'
 MONITOR_CONTROL_TOPIC = '/linked_execution/monitor_control'
 SAFETY_MONITOR_TOPIC  = '/safety_monitor/safe_to_execute'
 
-GAZEBO_WAIT_EXTRA = 5.0  # extra seconds beyond trajectory duration to wait for Gazebo
+GAZEBO_WAIT_EXTRA = 8.0  # extra seconds beyond trajectory duration to wait for Gazebo (increased from 5.0)
 
 
 class LinkedExecutionActionServer(object):

@@ -11,7 +11,7 @@
 | 现象 | 大概率原因 | 快速解决 |
 |------|------------|---------|
 | 启动超时 | 示教器急停未释放 | 检查示教器急停按钮 |
-| 网络连接失败 | 机器人 IP 不通 | `ping 192.168.1.10` |
+| 网络连接失败 | 机器人 IP 不通 | `ping 192.168.10.230` |
 | 大幅度运动警告 | RViz 位置与实机不一致 | 检查启动位置同步 |
 | Execute 失败 | 安全检查未通过 | 查看 `/safety_monitor/warning` |
 | Gazebo 不同步 | 镜像适配器未运行 | 检查 `/real/joint_states` 频率 |
@@ -40,7 +40,7 @@
    ```
 4. 检查网络连接：
    ```bash
-   ping 192.168.1.10
+   ping 192.168.10.230
    ```
 
 **解决方案**：
@@ -54,13 +54,13 @@
 
 **现象**：
 ```
-[aubo_driver] Failed to connect to robot at 192.168.1.10
+[aubo_driver] Failed to connect to robot at 192.168.10.230
 ```
 
 **排查步骤**：
 1. 测试网络连通性：
    ```bash
-   ping 192.168.1.10
+   ping 192.168.10.230
    ```
 2. 检查防火墙：
    ```bash
@@ -469,8 +469,6 @@ rosparam get /safety_monitor/large_motion_threshold
 
 ## 10. 相关文档
 
-- [系统架构](ARCHITECTURE.md) - 系统设计
-- [Unity 迁移](UNITY_MIGRATION.md) - Unity 集成指南
-- [P4 超时修复](P4_UNITY_TIMEOUT_FIX.md) - MoveIt 超时问题解决
-- [联动设计](LINKED_EXECUTION_DESIGN.md) - 设计原理
-- [数据流分析](Unity_Migration_Data_Flow_Analysis.md) - 架构对比
+- [系统架构](ARCHITECTURE.md) - 系统设计与数据流
+- [联动设计](LINKED_EXECUTION_DESIGN.md) - 设计原理与实现状态
+- [安全系统](SAFETY_SYSTEM.md) - 安全机制详解

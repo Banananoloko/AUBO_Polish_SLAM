@@ -11,6 +11,13 @@
   <arg name="sim_only"  default="false" doc="Set true to run sim+RViz without a real robot"/>
   <arg name="use_unity" default="false" doc="Use Unity simulator instead of Gazebo"/>
 
+  <!-- 全局参数：轨迹速度缩放因子，aubo_robot_simulator 在 trajectory_callback 中读取。
+       scale < 1 时同时降低速度值并扩展时间戳，使插补点更密集、Δpos 更小，
+       从而补偿机器人内部控制周期（约2ms）与模拟器插补周期（5ms）之间的时序不匹配。
+       计算公式: robot_vel ≈ moveit_vel × scale × (5ms / T_robot)
+       0.5 为保守起始值，测试通过后可逐步上调到 0.7-0.8。 -->
+  <param name="/aubo_controller/velocity_scale_factor" value="0.5"/>
+
   <!-- A. MoveIt 基础层 -->
   <include file="$(find aubo_e5_moveit_config)/launch/planning_context.launch">
     <arg name="load_robot_description" value="true"/>
@@ -68,22 +75,38 @@
   <rosparam file="$(find aubo_e5_moveit_config)/config/joint_names.yaml" command="load"/>
 
   <node pkg="aubo_controller" type="aubo_joint_trajectory_action"
-        name="aubo_joint_trajectory_action" output="screen"/>
+        name="aubo_joint_trajectory_action" output="screen">
+    <!-- goal_threshold: 轨迹终点关节公差 (rad), 默认 0.002 过严导致 CONTROL_FAILED -->
+    <param name="constraints/goal_threshold" value="0.04"/>
+  </node>
 
   <!-- sim_only：模拟器话题不隔离（它是唯一的 feedback 源） -->
   <node if="$(arg sim_only)"
         pkg="aubo_controller" type="aubo_robot_simulator"
-        name="aubo_robot_simulator" output="screen"/>
+        name="aubo_robot_simulator" output="screen">
+    <param name="/aubo_controller/velocity_scale_factor" value="0.5"/>
+  </node>
 
-  <!-- 联动模式：模拟器的 feedback_states / joint_states 重映射到隔离话题，
-       防止与 aubo_driver 的真实反馈混线。
-       aubo_joint_trajectory_action 只收到来自 aubo_driver 的真实 feedback，
-       确保 Execute 成功必须基于实机实际到位，而非本地模拟"喂成功"。 -->
+  <!-- 联动模式：模拟器的 feedback/joint_states/robot_status 隔离到 sim/ 前缀，
+       防止与 aubo_driver 的真实数据混线。
+       aubo_joint_trajectory_action 只收到来自 aubo_driver 的真实 feedback 和 robot_status，
+       确保 Execute 成功必须基于实机实际到位，而非本地模拟"喂成功"。
+
+       注意1：robot_status 若未隔离，仿真器的 in_motion=FALSE（数学插值 0.1s 跑完）
+       会覆盖实机驱动的 in_motion=TRUE，导致 action server 在实机未停稳时宣告 SUCCESS，
+       引发下一段轨迹暴起急停。
+
+       注意2：joint_path_command 不能隔离 — aubo_driver 订阅的是 moveItController_cmd
+       (JointTrajectoryPoint)，aubo_robot_simulator 是两者之间的插值桥：
+       joint_path_command(JointTrajectory) → 5阶多项式插值 → moveItController_cmd，
+       若切断此桥则实机永远收不到路点数据。 -->
   <node unless="$(arg sim_only)"
         pkg="aubo_controller" type="aubo_robot_simulator"
         name="aubo_robot_simulator" output="screen">
     <remap from="feedback_states" to="sim/feedback_states"/>
-    <remap from="joint_states" to="sim/joint_states"/>
+    <remap from="joint_states"    to="sim/joint_states"/>
+    <remap from="robot_status"    to="sim/robot_status"/>
+    <param name="/aubo_controller/velocity_scale_factor" value="0.5"/>
   </node>
 
   <!-- D. 实机驱动层（仅联动模式） -->
@@ -130,9 +153,9 @@
   <node unless="$(arg sim_only)"
         pkg="aubo_linked_execution" type="linked_execution_monitor.py"
         name="linked_execution_monitor" output="screen">
-    <param name="joint_tolerance" value="0.03"/>
-    <param name="success_cycles" value="3"/>
-    <param name="timeout_margin" value="2.0"/>
+    <param name="joint_tolerance" value="0.05"/>   <!-- 降低到 0.05 rad，更严格 -->
+    <param name="success_cycles" value="3"/>       <!-- 增加到 3 个周期，确保稳定 -->
+    <param name="timeout_margin" value="8.0"/>     <!-- 增加到 8 秒 -->
   </node>
 
   <node unless="$(arg sim_only)"

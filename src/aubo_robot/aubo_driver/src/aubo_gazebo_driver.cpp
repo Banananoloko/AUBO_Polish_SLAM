@@ -56,6 +56,13 @@ bool blending_ = false;
 float blend_alpha_ = 0.0;
 float joint_start_[ARM_DOF];
 
+// Publish immediately from shadow callback when not blending.
+// Declaring here so shadowCallback can read it without needing an atomic
+// (written only from the main thread, read from spinner thread — but the
+// race window is tiny and the worst outcome is one extra direct publish
+// during blend startup, which is harmless).
+bool g_direct_publish = false;
+
 static void publish_targets()
 {
     std_msgs::Float64 msg;
@@ -76,9 +83,16 @@ void gazeboJointStatesCallback(const sensor_msgs::JointStateConstPtr& msg)
 // Shadow mode: mirror real robot joint states → Gazebo
 void shadowCallback(const sensor_msgs::JointStateConstPtr& msg)
 {
-    std::lock_guard<std::mutex> lock(targets_mutex);
-    for (int i = 0; i < ARM_DOF && i < (int)msg->position.size(); i++)
-        joint_targets[i] = msg->position[i];
+    {
+        std::lock_guard<std::mutex> lock(targets_mutex);
+        for (int i = 0; i < ARM_DOF && i < (int)msg->position.size(); i++)
+            joint_targets[i] = msg->position[i];
+    }
+    // Publish immediately at the real-robot state rate (~50 Hz) when not in
+    // a blend.  This eliminates the 10 Hz step changes that caused derivative
+    // kicks (d × Δpos/0.001 s ≈ 312 Nm per step at 10 Hz → visual twitching).
+    if (g_direct_publish)
+        publish_targets();
 }
 
 // Normal mode: receive JointTrajectory from aubo_controller → Gazebo
@@ -168,24 +182,39 @@ int main(int argc, char **argv)
     ros::AsyncSpinner spinner(2);
     spinner.start();
 
-    ros::Rate rate(10);
+    // Startup blend: Gazebo begins at all-zeros; real robot may be elsewhere.
+    // Force a blend from the initial Gazebo state (zeros) to the first received
+    // real-robot state so the PID ramps smoothly rather than snapping.
+    if (shadow_mode)
+    {
+        blending_       = true;
+        g_direct_publish = false;
+        blend_alpha_    = 0.0;
+        // joint_start_ is already memset to 0 — matches Gazebo's spawn position.
+        ROS_INFO("[aubo_gazebo_driver] Startup blend initiated (Gazebo at zero → real robot position)");
+    }
+
+    // Main loop: 50 Hz.
+    // • During blend: drives Gazebo with interpolated targets.
+    // • Normal operation: shadowCallback publishes directly; main loop only
+    //   monitors for time discontinuities (Gazebo pause/reset).
+    ros::Rate rate(50);
     while (ros::ok())
     {
         if (shadow_mode)
         {
-            // Detect time discontinuity (Gazebo pause/reset)
+            // ---- Time-discontinuity detection (Gazebo pause / reset) ----
             ros::Time now = ros::Time::now();
             if (last_publish_time_.isValid())
             {
                 double dt = (now - last_publish_time_).toSec();
-                // Time jump: backward (reset) or forward >2s (long pause)
                 if (dt < -0.1 || dt > 2.0)
                 {
-                    ROS_WARN("[aubo_gazebo_driver] Time discontinuity detected (dt=%.2fs), starting 2s blend to prevent PID divergence", dt);
-                    blending_ = true;
-                    blend_alpha_ = 0.0;
+                    ROS_WARN("[aubo_gazebo_driver] Time discontinuity (dt=%.2fs) — starting 2 s blend", dt);
+                    g_direct_publish = false;
+                    blending_        = true;
+                    blend_alpha_     = 0.0;
 
-                    // Save current Gazebo positions as blend start (match by joint name)
                     std::lock_guard<std::mutex> gazebo_lock(gazebo_state_mutex_);
                     if (!current_gazebo_state_.position.empty())
                     {
@@ -202,15 +231,11 @@ int main(int argc, char **argv)
                                 }
                             }
                             if (!found)
-                            {
-                                // Fallback: use current target if Gazebo state unavailable
                                 joint_start_[i] = joint_targets[i];
-                            }
                         }
                     }
                     else
                     {
-                        ROS_WARN("[aubo_gazebo_driver] Gazebo joint states not available, using targets as blend start");
                         std::lock_guard<std::mutex> lock(targets_mutex);
                         for (int i = 0; i < ARM_DOF; i++)
                             joint_start_[i] = joint_targets[i];
@@ -219,32 +244,28 @@ int main(int argc, char **argv)
             }
             last_publish_time_ = now;
 
-            // Publish with blending if in protection mode
-            std::lock_guard<std::mutex> lock(targets_mutex);
+            // ---- Blend: ramp from joint_start_ → joint_targets_ ----
             if (blending_)
             {
-                blend_alpha_ += 0.05; // 0.05 * 20 iterations = 1.0 over 2 seconds at 10Hz
-                if (blend_alpha_ >= 1.0)
+                // 2-second ramp at 50 Hz: step = 1/(50*2) = 0.01 per iteration
+                blend_alpha_ += 0.01f;
+                if (blend_alpha_ >= 1.0f)
                 {
-                    blend_alpha_ = 1.0;
-                    blending_ = false;
-                    ROS_INFO("[aubo_gazebo_driver] Blend complete, resuming normal shadow mode");
+                    blend_alpha_     = 1.0f;
+                    blending_        = false;
+                    g_direct_publish = true;  // switch callback to direct publish
+                    ROS_INFO("[aubo_gazebo_driver] Blend complete — direct 50 Hz shadow active");
                 }
 
-                // Smooth interpolation: start → target
                 std_msgs::Float64 msg;
+                std::lock_guard<std::mutex> lock(targets_mutex);
                 for (int i = 0; i < ARM_DOF; i++)
                 {
-                    float blended = joint_start_[i] * (1.0 - blend_alpha_) + joint_targets[i] * blend_alpha_;
-                    msg.data = blended;
+                    msg.data = joint_start_[i] * (1.0f - blend_alpha_) + joint_targets[i] * blend_alpha_;
                     pub_joints[i].publish(msg);
                 }
             }
-            else
-            {
-                // Normal operation
-                publish_targets();
-            }
+            // else: shadowCallback is publishing directly at real-robot rate.
         }
         rate.sleep();
     }

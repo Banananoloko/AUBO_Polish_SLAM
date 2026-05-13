@@ -1,3 +1,14 @@
+# PID tuning rationale (shadow mode, 50 Hz setpoint, 1 ms physics step):
+#
+# Shadow setpoint step per 20 ms at max velocity (0.625 rad/s): 0.0125 rad
+# Derivative kick  = d × Δerror/dt = d × 0.0125/0.001
+#   Old (10 Hz, d=5.0): 312 Nm → visible twitching
+#   New (50 Hz, d=3.0): 37.5 Nm → smooth tracking
+#
+# P: kept high for tight position tracking (mirror accuracy).
+# I: small anti-windup integral; i_clamp prevents buildup at joint limits.
+# D: reduced from original to eliminate derivative kick; damping still
+#    sufficient because step size is 5× smaller at 50 Hz.
 aubo_e5:
   # publish all joint states--------------
   joint_state_controller:
@@ -8,39 +19,39 @@ aubo_e5:
   shoulder_joint_position_controller:
     type: position_controllers/JointPositionController
     joint: shoulder_joint
-    pid: {p: 800.0, i: 0.02, d: 5.0, i_clamp: 0.5}
+    pid: {p: 800.0, i: 0.02, d: 3.0, i_clamp: 0.5}
 
   upperArm_joint_position_controller:
     type: position_controllers/JointPositionController
     joint: upperArm_joint
-    pid: {p: 750.0, i: 0.02, d: 5.0, i_clamp: 0.5}
+    pid: {p: 750.0, i: 0.02, d: 3.0, i_clamp: 0.5}
 
   foreArm_joint_position_controller:
     type: position_controllers/JointPositionController
     joint: foreArm_joint
-    pid: {p: 500.0, i: 0.02, d: 4.0, i_clamp: 0.5}
+    pid: {p: 500.0, i: 0.02, d: 2.5, i_clamp: 0.5}
 
   wrist1_joint_position_controller:
     type: position_controllers/JointPositionController
     joint: wrist1_joint
-    pid: {p: 80.0, i: 0.002, d: 2.5, i_clamp: 0.5}
+    pid: {p: 80.0, i: 0.002, d: 1.5, i_clamp: 0.5}
 
   wrist2_joint_position_controller:
     type: position_controllers/JointPositionController
     joint: wrist2_joint
-    pid: {p: 80.0, i: 0.002, d: 2.5, i_clamp: 0.5}
+    pid: {p: 80.0, i: 0.002, d: 1.5, i_clamp: 0.5}
 
   wrist3_joint_position_controller:
     type: position_controllers/JointPositionController
     joint: wrist3_joint
-    pid: {p: 40.0, i: 0.002, d: 1.5, i_clamp: 0.3}
+    pid: {p: 40.0, i: 0.002, d: 0.8, i_clamp: 0.3}
 
   gazebo_ros_control:
     pid_gains:
-      shoulder_joint:  {p: 800.0, i: 0.02, d: 5.0, i_clamp: 0.5}
-      upperArm_joint:  {p: 750.0, i: 0.02, d: 5.0, i_clamp: 0.5}
-      foreArm_joint:   {p: 500.0, i: 0.02, d: 4.0, i_clamp: 0.5}
-      wrist1_joint:    {p: 80.0,  i: 0.002, d: 2.5, i_clamp: 0.5}
-      wrist2_joint:    {p: 80.0,  i: 0.002, d: 2.5, i_clamp: 0.5}
-      wrist3_joint:    {p: 40.0,  i: 0.002, d: 1.5, i_clamp: 0.3}
+      shoulder_joint:  {p: 800.0, i: 0.02, d: 3.0, i_clamp: 0.5}
+      upperArm_joint:  {p: 750.0, i: 0.02, d: 3.0, i_clamp: 0.5}
+      foreArm_joint:   {p: 500.0, i: 0.02, d: 2.5, i_clamp: 0.5}
+      wrist1_joint:    {p: 80.0,  i: 0.002, d: 1.5, i_clamp: 0.5}
+      wrist2_joint:    {p: 80.0,  i: 0.002, d: 1.5, i_clamp: 0.5}
+      wrist3_joint:    {p: 40.0,  i: 0.002, d: 0.8, i_clamp: 0.3}
 

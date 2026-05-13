@@ -317,7 +317,7 @@ unity_joint_states_publisher
 ```bash
 # Gazebo 联动模式（实机 + Gazebo 镜像）
 roslaunch aubo_linked_execution aubo_e5_linked_execution.launch \
-    robot_ip:=192.168.1.10
+    robot_ip:=192.168.10.230
 
 # Gazebo 仿真模式（仅 Gazebo）
 roslaunch aubo_linked_execution aubo_e5_linked_execution.launch \
@@ -329,14 +329,12 @@ roslaunch aubo_linked_execution aubo_e5_linked_execution.launch \
 
 # Unity 联动模式（实机 + Unity 镜像）
 roslaunch aubo_linked_execution aubo_e5_linked_execution.launch \
-    robot_ip:=192.168.1.10 use_unity:=true
+    robot_ip:=192.168.10.230 use_unity:=true
 ```
 
 ---
 
 **相关文档**：
-- [联动设计](LINKED_EXECUTION_DESIGN.md) - 详细设计原理
-- [Unity 迁移](UNITY_MIGRATION.md) - 迁移指南和调试
+- [联动设计](LINKED_EXECUTION_DESIGN.md) - 详细设计原理与实现状态
 - [故障排查](TROUBLESHOOTING.md) - 常见问题解决
-- [P4 超时修复](P4_UNITY_TIMEOUT_FIX.md) - Unity 50Hz 发布频率修复
-- [数据流分析](Unity_Migration_Data_Flow_Analysis.md) - 详细架构对比
+- [安全系统](SAFETY_SYSTEM.md) - 安全机制详解

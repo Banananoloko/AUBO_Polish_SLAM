@@ -98,7 +98,7 @@ start_p6() {
     echo "  启动 P6 Shadow 模式"
     echo "=========================================="
     echo ""
-    echo "实机 IP: 192.168.1.10"
+    echo "实机 IP: 192.168.10.230"
     echo "模式: Unity Shadow (实机镜像到 Unity)"
     echo ""
     echo "按 Ctrl+C 停止"
@@ -108,7 +108,7 @@ start_p6() {
     source devel/setup.bash
 
     roslaunch aubo_linked_execution aubo_e5_linked_execution.launch \
-        robot_ip:=192.168.1.10 \
+        robot_ip:=192.168.10.230 \
         use_unity:=true
 }
 

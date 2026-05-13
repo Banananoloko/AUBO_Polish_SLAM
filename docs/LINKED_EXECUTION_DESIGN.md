@@ -602,7 +602,6 @@ AUBO SDK / 实机
 
 ## 相关文档
 
-- [系统架构](ARCHITECTURE.md) - 完整系统设计
-- [Unity 迁移](UNITY_MIGRATION.md) - Unity 后端集成
-- [数据流分析](Unity_Migration_Data_Flow_Analysis.md) - 架构对比分析
+- [系统架构](ARCHITECTURE.md) - 完整系统设计（含 Unity 后端数据流）
 - [故障排查](TROUBLESHOOTING.md) - 常见问题解决
+- [安全系统](SAFETY_SYSTEM.md) - 安全机制详解

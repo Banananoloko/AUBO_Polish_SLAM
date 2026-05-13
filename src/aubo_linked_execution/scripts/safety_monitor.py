@@ -33,12 +33,19 @@ class SafetyMonitor:
         self.safe_to_execute_pub = rospy.Publisher('/safety_monitor/safe_to_execute', Bool, queue_size=1, latch=True)
 
         # Subscribers
-        rospy.Subscriber('/joint_states', JointState, self.joint_state_cb, queue_size=1)
+        # 根据是否为联动模式选择订阅话题
+        sim_only = rospy.get_param('/sim_only', False)
+        joint_states_topic = '/joint_states' if sim_only else '/real/joint_states'
+        rospy.loginfo('[safety_monitor] Subscribing to: %s', joint_states_topic)
+        rospy.Subscriber(joint_states_topic, JointState, self.joint_state_cb, queue_size=1)
         rospy.Subscriber('/move_group/display_planned_path', DisplayTrajectory, self.planned_path_cb, queue_size=1)
         rospy.Subscriber('/joint_path_command', JointTrajectory, self.trajectory_command_cb, queue_size=1)
 
         # 初始状态：安全
         self.safe_to_execute_pub.publish(Bool(data=True))
+
+        # 心跳定时器：每 2s 发布一次，防止 linked_execution_action_server 看门狗超时
+        self._heartbeat_timer = rospy.Timer(rospy.Duration(2.0), self._heartbeat_cb)
 
         rospy.loginfo('[safety_monitor] Safety monitor started')
         rospy.loginfo('[safety_monitor] Large motion threshold: %.2f rad (%.1f deg)',
@@ -50,6 +57,10 @@ class SafetyMonitor:
         rospy.loginfo('[safety_monitor] Manual movement threshold: %.2f rad (%.1f deg)',
                       self.manual_movement_threshold,
                       self.manual_movement_threshold * 57.3)
+
+    def _heartbeat_cb(self, event):
+        """定期心跳，防止 linked_execution_action_server 看门狗超时"""
+        self.safe_to_execute_pub.publish(Bool(data=True))
 
     def joint_state_cb(self, msg):
         with self.lock:

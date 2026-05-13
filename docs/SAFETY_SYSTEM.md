@@ -255,7 +255,7 @@ def _execute_cb(self, goal):
 联动模式启动时，安全系统自动激活：
 
 ```bash
-roslaunch aubo_linked_execution aubo_e5_linked_execution.launch robot_ip:=192.168.1.10
+roslaunch aubo_linked_execution aubo_e5_linked_execution.launch robot_ip:=192.168.10.230
 ```
 
 **启动顺序**:
@@ -265,3 +265,38 @@ roslaunch aubo_linked_execution aubo_e5_linked_execution.launch robot_ip:=192.16
 4. `aubo_robot_startup` 上电 + 切换控制模式 + **位置同步验证**
 5. `safety_monitor` 开始监控
 6. `linked_execution_action_server` 就绪（集成安全检查）
+
+---
+
+## 弹窗报警系统 (alert_dialog.py)
+
+`scripts/alert_dialog.py` 提供线程安全的 GUI 弹窗，供各安全节点调用。
+
+### 报警级别
+
+| 级别 | 颜色 | 声音 | 用途 |
+|------|------|------|------|
+| INFO | 蓝色 | 无 | 正常状态更新 |
+| WARNING | 橙色 | 无 | 性能警告、收敛缓慢 |
+| ERROR | 红色 | 有 | 执行失败、收敛超时 |
+| CRITICAL | 紫色 | 有 | 安全检查失败、碰撞风险 |
+
+### API 用法
+
+```python
+from alert_dialog import AlertDialog
+
+AlertDialog.info(title="系统启动", message="联动系统已就绪")
+AlertDialog.warning(title="收敛缓慢", message="Gazebo 收敛时间超预期", details="实际: 5.2s")
+AlertDialog.error(title="收敛失败", message="Gazebo 未在规定时间内收敛", sound=True)
+AlertDialog.critical(title="安全失败", message="检测到大幅度运动！", details="偏差: 0.8 rad", sound=True)
+
+# 可选：自动关闭（秒）
+AlertDialog.info(title="启动完成", message="...", auto_close=5)
+```
+
+**特性**：在独立线程中运行（不阻塞 ROS 节点）、置顶显示、5 秒自动关闭可选。
+
+**前置依赖**：`python3-tk`、`pulseaudio-utils`（声音）。
+
+**演示**：`rosrun aubo_linked_execution alert_dialog_demo.py`

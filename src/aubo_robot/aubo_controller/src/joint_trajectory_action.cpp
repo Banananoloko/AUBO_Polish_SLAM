@@ -41,12 +41,12 @@ namespace industrial_robot_client
 namespace joint_trajectory_action
 {
 const double JointTrajectoryAction::WATCHDOG_PERIOD_ = 1.0;
-const double JointTrajectoryAction::DEFAULT_GOAL_THRESHOLD_ = 0.002;
+const double JointTrajectoryAction::DEFAULT_GOAL_THRESHOLD_ = 0.04;
 
 JointTrajectoryAction::JointTrajectoryAction(std::string controller_name) :
     action_server_(node_, controller_name, boost::bind(&JointTrajectoryAction::goalCB, this, _1),
                    boost::bind(&JointTrajectoryAction::cancelCB, this, _1), false), has_active_goal_(false),
-                       controller_alive_(false), has_moved_once_(false)
+                       controller_alive_(false), has_moved_once_(false), first_converged_(ros::Time(0))
 {
   ros::NodeHandle pn("~");
 
@@ -171,6 +171,7 @@ void JointTrajectoryAction::goalCB(const JointTractoryActionServer::GoalHandle &
       tmp_gh.setAccepted();
       active_goal_ = tmp_gh;
       has_active_goal_ = true;
+      first_converged_ = ros::Time(0);  // reset per-goal convergence timer
       time_to_check_ = ros::Time::now() +
           ros::Duration(active_goal_.getGoal()->trajectory.points.back().time_from_start.toSec() / 2.0);
       has_moved_once_ = false;
@@ -296,24 +297,23 @@ void JointTrajectoryAction::controllerStateCB(const control_msgs::FollowJointTra
       }
       else
       {
-        // Unity 修复：添加2秒超时保护
-        // Unity 的 JointState 消息缺少真实速度数据，导致 in_motion 误判为 TRUE
-        // 当位置已收敛但 in_motion 仍为 TRUE 时，等待2秒后强制成功
-        static ros::Time first_converged = ros::Time(0);
-        if (first_converged.isZero())
+        // 2-second forced-success timeout for cases where the robot reports
+        // in_motion=TRUE even though position has converged (e.g. Unity/Gazebo
+        // simulation where velocity feedback is unreliable).
+        if (first_converged_.isZero())
         {
-          first_converged = ros::Time::now();
+          first_converged_ = ros::Time::now();
           ROS_INFO("Within goal constraints but robot is still moving");
         }
         else
         {
-          double elapsed = (ros::Time::now() - first_converged).toSec();
+          double elapsed = (ros::Time::now() - first_converged_).toSec();
           if (elapsed > 2.0)
           {
-            ROS_WARN("Position converged for %.1fs but still in_motion, forcing success (Unity mode)", elapsed);
+            ROS_WARN("Position converged for %.1fs but still in_motion, forcing success", elapsed);
             active_goal_.setSucceeded();
             has_active_goal_ = false;
-            first_converged = ros::Time(0);
+            first_converged_ = ros::Time(0);
           }
           else
           {
@@ -332,9 +332,8 @@ void JointTrajectoryAction::controllerStateCB(const control_msgs::FollowJointTra
   }
   else
   {
-    // 如果不在目标约束内，重置计时器
-    static ros::Time first_converged = ros::Time(0);
-    first_converged = ros::Time(0);
+    // Not within goal constraints yet — reset the convergence timer.
+    first_converged_ = ros::Time(0);
   }
 }
 

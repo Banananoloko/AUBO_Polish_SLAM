@@ -1,34 +1,39 @@
-# joint_limits.yaml allows the dynamics properties specified in the URDF to be overwritten or augmented as needed
-# Specific joint properties can be changed with the keys [max_position, min_position, max_velocity, max_acceleration]
-# Joint limits can be turned off with [has_velocity_limits, has_acceleration_limits]
+# joint_limits.yaml — AUBO E5 calibrated to ~40% of hardware limits.
+# Hardware max (from aubo_driver.cpp MaxVelc/MaxAcc):
+#   Joints 1-3:  2.596 rad/s,  17.309 rad/s^2
+#   Joints 4-6:  3.110 rad/s,  20.737 rad/s^2
+# 40% values account for ~2.5x timing amplification at robot (driver assumes
+# 5ms waypoint spacing; robot internal control loop likely runs at 2ms).
+# Velocity at robot ≈ moveit_vel × VELOCITY_SCALING × velocity_scale_factor × 2.5
+#   = 1.0 × 0.5 × 0.5 × 2.5 = 0.625 rad/s (~24% HW) — safe with margin.
 joint_limits:
-  foreArm_joint:
-    has_velocity_limits: true
-    max_velocity: 0.8
-    has_acceleration_limits: true
-    max_acceleration: 0.8
   shoulder_joint:
     has_velocity_limits: true
-    max_velocity: 0.8
+    max_velocity: 1.0
     has_acceleration_limits: true
-    max_acceleration: 0.8
+    max_acceleration: 7.0
   upperArm_joint:
     has_velocity_limits: true
-    max_velocity: 0.8
+    max_velocity: 1.0
     has_acceleration_limits: true
-    max_acceleration: 0.8
+    max_acceleration: 7.0
+  foreArm_joint:
+    has_velocity_limits: true
+    max_velocity: 1.0
+    has_acceleration_limits: true
+    max_acceleration: 7.0
   wrist1_joint:
     has_velocity_limits: true
-    max_velocity: 0.8
+    max_velocity: 1.25
     has_acceleration_limits: true
-    max_acceleration: 0.8
+    max_acceleration: 8.3
   wrist2_joint:
     has_velocity_limits: true
-    max_velocity: 0.8
+    max_velocity: 1.25
     has_acceleration_limits: true
-    max_acceleration: 0.8
+    max_acceleration: 8.3
   wrist3_joint:
     has_velocity_limits: true
-    max_velocity: 0.8
+    max_velocity: 1.25
     has_acceleration_limits: true
-    max_acceleration: 0.8
+    max_acceleration: 8.3

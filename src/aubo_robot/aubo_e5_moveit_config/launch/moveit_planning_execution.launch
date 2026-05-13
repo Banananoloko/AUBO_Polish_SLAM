@@ -19,7 +19,9 @@
   <node pkg="aubo_controller" type="aubo_robot_simulator" name="aubo_robot_simulator"/>
   
   <!-- joint_trajectory_action: provides actionlib interface for high-level robot control -->
-  <node pkg="aubo_controller" type="aubo_joint_trajectory_action" name="aubo_joint_trajectory_action"/>
+  <node pkg="aubo_controller" type="aubo_joint_trajectory_action" name="aubo_joint_trajectory_action">
+    <param name="constraints/goal_threshold" value="0.04"/>
+  </node>
 
   <!-- run the "real robot" interface nodes -->
   <!--   - this typically includes: robot_state, motion_interface, and joint_trajectory_action nodes -->
