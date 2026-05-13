@@ -24,8 +24,36 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODE="sim"
 ROBOT_IP=""
 AUTO_START_UI=true
+ENABLE_MONITOR=true
+MONITOR_PID=""
+ROSLAUNCH_PID=""
 
-# 解析参数
+# ---- 清理函数 ----
+cleanup() {
+    echo -e "${YELLOW}[CLEANUP] 关闭所有进程...${NC}"
+    [ -n "${ROSLAUNCH_PID:-}" ] && kill "$ROSLAUNCH_PID" 2>/dev/null; wait "$ROSLAUNCH_PID" 2>/dev/null || true
+    [ -n "${MONITOR_PID:-}" ]   && kill "$MONITOR_PID"   2>/dev/null; wait "$MONITOR_PID"   2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+# ---- 监控窗口启动函数 ----
+launch_monitor_window() {
+    local cmd="$1"
+    if command -v gnome-terminal &>/dev/null; then
+        gnome-terminal -- bash -c "$cmd; exec bash" &
+        MONITOR_PID=$!
+    elif command -v xterm &>/dev/null; then
+        xterm -e "bash -c '$cmd; exec bash'" &
+        MONITOR_PID=$!
+    else
+        # No GUI terminal — run in background, output to /tmp/aubo_monitor.log
+        bash -c "$cmd" > /tmp/aubo_monitor_$(date +%Y%m%d_%H%M%S).log 2>&1 &
+        MONITOR_PID=$!
+        echo -e "${YELLOW}[MONITOR] 无图形终端，日志写入 /tmp/aubo_monitor_*.log${NC}"
+    fi
+}
+
+# ---- 解析参数 ----
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --real)
@@ -37,15 +65,20 @@ while [[ $# -gt 0 ]]; do
             AUTO_START_UI=false
             shift
             ;;
+        --no-monitor)
+            ENABLE_MONITOR=false
+            shift
+            ;;
         --help|-h)
             echo "AUBO E5 正方形轨迹演示 — 一键启动（扩展版）"
             echo ""
             echo "用法: ./run_square_demo.sh [选项]"
             echo ""
             echo "选项:"
-            echo "  --real <ip>   实机+Gazebo镜像模式 (默认: 仅仿真)"
-            echo "  --no-ui       仅启动 ROS 系统，不自动启动交互界面"
-            echo "  --help        显示此帮助"
+            echo "  --real <ip>    实机+Gazebo镜像模式 (默认: 仅仿真)"
+            echo "  --no-ui        仅启动 ROS 系统，不自动启动交互界面"
+            echo "  --no-monitor   不启动虚实同步监控窗口"
+            echo "  --help         显示此帮助"
             echo ""
             echo "扩展版界面功能:"
             echo "  [1] 执行正方形轨迹 (20cm × 20cm, YZ 平面)"
@@ -130,16 +163,17 @@ if [ "$MODE" = "real" ]; then
             exit 1
         fi
 
+        # 启动监控窗口
+        if [ "$ENABLE_MONITOR" = true ]; then
+            echo -e "${CYAN}[MONITOR] 启动虚实同步监控窗口...${NC}"
+            launch_monitor_window "$SCRIPT_DIR/startup_log_real.sh"
+            sleep 1
+        fi
+
         # 启动扩展版交互界面
         echo -e "${GREEN}[START] 启动扩展版交互界面...${NC}"
         echo ""
         rosrun aubo_linked_execution square_demo_control.py
-
-        # 用户退出界面后，清理 roslaunch
-        echo ""
-        echo -e "${YELLOW}[CLEANUP] 关闭 ROS 系统...${NC}"
-        kill $ROSLAUNCH_PID 2>/dev/null
-        wait $ROSLAUNCH_PID 2>/dev/null
     else
         roslaunch aubo_linked_execution aubo_e5_linked_execution.launch \
             robot_ip:="$ROBOT_IP"
@@ -168,16 +202,17 @@ else
             exit 1
         fi
 
+        # 启动监控窗口
+        if [ "$ENABLE_MONITOR" = true ]; then
+            echo -e "${CYAN}[MONITOR] 启动虚实同步监控窗口...${NC}"
+            launch_monitor_window "$SCRIPT_DIR/startup_log_real.sh"
+            sleep 1
+        fi
+
         # 启动扩展版交互界面
         echo -e "${GREEN}[START] 启动扩展版交互界面...${NC}"
         echo ""
         rosrun aubo_linked_execution square_demo_control.py
-
-        # 用户退出界面后，清理 roslaunch
-        echo ""
-        echo -e "${YELLOW}[CLEANUP] 关闭 ROS 系统...${NC}"
-        kill $ROSLAUNCH_PID 2>/dev/null
-        wait $ROSLAUNCH_PID 2>/dev/null
     else
         roslaunch aubo_linked_execution aubo_e5_linked_execution.launch \
             sim_only:=true
