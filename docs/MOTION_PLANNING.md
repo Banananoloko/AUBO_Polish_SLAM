@@ -85,59 +85,60 @@ wrist3_joint:      ±3.05 rad (±174.8°)
 
 ### 2.1 快速开始
 
-**启动仿真系统**：
 ```bash
-roslaunch aubo_linked_execution aubo_e5_linked_execution.launch sim_only:=true
+# 正方形轨迹演示（虚实同步，含同步延迟监测）
+./run_square_demo.sh
+
+# 或使用连续运动脚本（支持多种轨迹配置）
+rosrun aubo_linked_execution continuous_motion_demo.py --mode cartesian --config square_motion.yaml
 ```
 
-**运行连续运动演示**（新终端）：
+**三种模式**：
+
 ```bash
-# 关节空间模式：直接指定各关节角度
-rosrun aubo_linked_execution continuous_motion_demo.py --mode joint
+rosrun aubo_linked_execution continuous_motion_demo.py --mode joint      # 关节空间
+rosrun aubo_linked_execution continuous_motion_demo.py --mode cartesian  # 笛卡尔空间（推荐）
+rosrun aubo_linked_execution continuous_motion_demo.py --mode named      # 预定义位置序列
 
-# 笛卡尔空间模式：指定末端执行器位置和姿态
-rosrun aubo_linked_execution continuous_motion_demo.py --mode cartesian
-
-# 预定义位置模式：使用命名位置（如 home、ready）
-rosrun aubo_linked_execution continuous_motion_demo.py --mode named
-
-# 循环执行模式：连续循环运动
-rosrun aubo_linked_execution continuous_motion_demo.py --mode joint --loop
+# 循环执行
+rosrun aubo_linked_execution continuous_motion_demo.py --mode cartesian --config square_motion.yaml --loop
+rosrun aubo_linked_execution continuous_motion_demo.py --mode cartesian --config square_motion.yaml --loop --iterations 10
 ```
 
-### 2.2 配置路径点
+### 2.2 内置示例轨迹
 
-编辑 `src/aubo_linked_execution/config/motion_waypoints.yaml` 自定义路径点：
+| 文件 | 描述 |
+|------|------|
+| `square_motion.yaml` | 正方形 20cm×20cm，起点 (0.4, -0.1, 0.4) |
+| `circle_motion.yaml` | 圆形半径 10cm，圆心 (0.4, 0.0, 0.5)，8 点近似 |
+| `patrol_motion.yaml` | 4 点巡航：(0.3,0.2,0.5) → (0.5,0.2,0.4) → (0.5,-0.2,0.4) → (0.3,-0.2,0.5) |
+
+### 2.3 自定义轨迹配置格式
+
+创建文件 `src/aubo_linked_execution/config/my_traj.yaml`：
 
 ```yaml
-# 关节空间路径点（弧度）
-joint_waypoints:
-  - [0.0, -0.5, 0.5, 0.0, 0.5, 0.0]      # 路径点 1
-  - [0.5, -0.5, 0.5, 0.0, 0.5, 0.0]      # 路径点 2
-  - [1.0, -1.0, 1.0, 0.0, 0.5, 0.0]      # 路径点 3
+name: "My Custom Trajectory"
+mode: cartesian
 
-# 笛卡尔空间路径点（米）
 cartesian_waypoints:
-  - position: {x: 0.3, y: 0.2, z: 0.4}
-    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
-  - position: {x: 0.4, y: 0.3, z: 0.5}
-    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+  - position: {x: 0.4, y: 0.0, z: 0.5}
+    orientation: {x: 0.0, y: 0.707, z: 0.0, w: 0.707}
+  - position: {x: 0.5, y: 0.1, z: 0.4}
+    orientation: {x: 0.0, y: 0.707, z: 0.0, w: 0.707}
 
-# 预定义目标序列
+# 或关节空间
+joint_waypoints:
+  - [0.0, -0.5, 0.5, 0.0, 0.5, 0.0]
+  - [0.5, -0.5, 0.5, 0.0, 0.5, 0.0]
+
+# 或预定义位置序列
 named_targets: ["home", "ready", "home"]
 ```
 
-### 2.3 常见问题
+### 2.4 常见问题
 
-**Q: 连续运动执行失败**
-- 检查路径点是否超出工作空间或关节限位
-- 在 RViz 中手动测试每个路径点
-- 查看终端日志了解具体错误信息
-
-**Q: 笛卡尔空间规划失败**
-- 检查目标位置是否在工作空间内
-- 尝试调整姿态（orientation）
-- 使用关节空间模式作为替代方案
+**规划失败**：检查路径点是否在工作空间内（臂展 ≤ 0.784m，关节限位 ±3.05 rad）；尝试调整姿态或切换关节空间模式。
 
 ---
 
@@ -335,7 +336,46 @@ joint_update_limit: 0.1
 
 ---
 
-## 7. 相关文档
+## 7. 坐标系参考
+
+### 基座坐标系（base_link）
+
+零位姿态（所有关节为 0 rad）：机器臂竖直向上。
+
+```
+原点：base_link 中心（基座中心）
+X 轴：机器人正前方
+Y 轴：机器人左侧
+Z 轴：竖直向上
+```
+
+验证：`rosrun tf tf_echo base_link wrist3_Link`
+
+**零位时 TCP 位置**：约 (0, 0, 0.8m)，姿态与 base_link 对齐。
+
+### 关节旋转轴
+
+所有 6 个关节均绕 Z 轴旋转（标准 DH 参数约定）。
+
+### 手眼标定配置文件位置
+
+```
+data/comatrix_scene/metadata/T_base_camera.yaml   # Eye-to-Hand（相机固定在基座）
+data/comatrix_scene/metadata/T_tcp_camera.yaml    # Eye-in-Hand（相机固定在末端）
+```
+
+### 工作空间快速参考
+
+| 参数 | 值 |
+|------|-----|
+| 最大臂展 | 0.784 m |
+| 高度范围 | 0 ~ 1.224 m |
+| 关节限位 | ±3.05 rad (±174.8°) |
+| 最大力矩 | 300 N·m |
+
+---
+
+## 8. 相关文档
 
 - [系统架构](ARCHITECTURE.md) - 完整数据流
 - [操作指南](../OPERATION_GUIDE.md) - 实机操作

@@ -174,6 +174,13 @@ private:
   ros::Time time_to_check_;
 
   /**
+   * \brief Timestamp of first convergence while robot reports in_motion.
+   * Used for the 2-second forced-success timeout.  Stored as a member
+   * (not static local) so it resets cleanly at the start of each new goal.
+   */
+  ros::Time first_converged_;
+
+  /**
    * \brief The watchdog period (seconds)
    */
   static const double WATCHDOG_PERIOD_;// = 1.0;

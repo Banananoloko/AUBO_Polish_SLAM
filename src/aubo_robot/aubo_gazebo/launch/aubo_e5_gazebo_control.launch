@@ -21,7 +21,8 @@
     <arg name="use_sim_time" value="$(arg use_sim_time)"/>
     <arg name="headless" value="$(arg headless)"/>
     <arg name="world_name" value="$(arg world_name)"/>
-    <arg name="extra_gazebo_args" value="--lockstep"/>
+    <!-- 移除 lockstep 参数以提高 Gazebo 仿真速度，避免灰色影子机器臂运动缓慢导致超时 -->
+    <arg name="extra_gazebo_args" value=""/>
   </include>
 
   <!-- load robot URDF to parameter server -->

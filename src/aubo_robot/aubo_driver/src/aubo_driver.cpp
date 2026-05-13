@@ -899,10 +899,13 @@ std::vector<aubo_robot_namespace::wayPoint_S> AuboDriver::tryPopWaypoint(int cou
                 // joint_filter_: current joint
                 // joint :        target joint. next point
                 if(0X3F != same_point) {
+                    // Robot MAC executes each waypoint in 2ms (500Hz servo loop), NOT 5ms.
+                    // Using 0.002 so the interpolation limit matches what the robot actually enforces.
+                    const double ROBOT_WAYPOINT_DT = 0.002;
                     //Check if the speed exceeds the limit.
                     double max_ratio = 1.0;
                     for(int i = 0 ; i < 6 ; i++) {
-                        target_joint_velc_.jointPara[i] = fabs(joint[i] - joint_filter_[i]) / 0.005;
+                        target_joint_velc_.jointPara[i] = fabs(joint[i] - joint_filter_[i]) / ROBOT_WAYPOINT_DT;
                         if(target_joint_velc_.jointPara[i] > MaxVelc[i]) {
                             double ratio = target_joint_velc_.jointPara[i] / MaxVelc[i];
                             if(ratio > max_ratio) {
@@ -932,11 +935,12 @@ std::vector<aubo_robot_namespace::wayPoint_S> AuboDriver::tryPopWaypoint(int cou
 
                     //Check if the acceleration exceeds the limit.
                     for(int i = 0 ; i < 6 ; i++) {
-                        joint_acc_.jointPara[i] = fabs(target_joint_velc_.jointPara[i] - last_joint_velc_.jointPara[i]) / 0.005 ;
+                        joint_acc_.jointPara[i] = fabs(target_joint_velc_.jointPara[i] - last_joint_velc_.jointPara[i]) / ROBOT_WAYPOINT_DT;
                         if(joint_acc_.jointPara[i] > MaxAcc[i]) {
                             if(over_speed_flag_){
-                                ROS_INFO("Joint %d acc: (%f - %f)/0.005 = %f  ", i,
-                                    target_joint_velc_.jointPara[i], last_joint_velc_.jointPara[i], joint_acc_.jointPara[i]);
+                                ROS_INFO("Joint %d acc: (%f - %f)/%.3f = %f  ", i,
+                                    target_joint_velc_.jointPara[i], last_joint_velc_.jointPara[i],
+                                    ROBOT_WAYPOINT_DT, joint_acc_.jointPara[i]);
                             }
                         }
                     }
@@ -1038,11 +1042,12 @@ void AuboDriver::publishWaypointToRobot()
 int AuboDriver::checkTargetVelc(JointParam mTaget_JointAngle, JointParam mLast_JointAngle, 
                                 JointVelcAccParam &mJointVelc)
 {
+    const double ROBOT_WAYPOINT_DT = 0.002;  // robot MAC at 500Hz = 2ms per waypoint
     for(int i = 0 ; i < 6 ; i++) {
-        mJointVelc.jointPara[i] = fabs(mTaget_JointAngle.jointPos[i] - mLast_JointAngle.jointPos[i]) / 0.005;
+        mJointVelc.jointPara[i] = fabs(mTaget_JointAngle.jointPos[i] - mLast_JointAngle.jointPos[i]) / ROBOT_WAYPOINT_DT;
         if(mJointVelc.jointPara[i] > MaxVelc[i]) {
-            ROS_INFO("Joint %d velc: (%f - %f) / 0.005 = %f  ", i, mTaget_JointAngle.jointPos[i], 
-                     mLast_JointAngle.jointPos[i], mJointVelc.jointPara[i]);
+            ROS_INFO("Joint %d velc: (%f - %f) / %.3f = %f  ", i, mTaget_JointAngle.jointPos[i],
+                     mLast_JointAngle.jointPos[i], ROBOT_WAYPOINT_DT, mJointVelc.jointPara[i]);
             ROS_INFO("Joint%d velc out of limit.", i + 1);
             return -1;
         }
@@ -1052,11 +1057,13 @@ int AuboDriver::checkTargetVelc(JointParam mTaget_JointAngle, JointParam mLast_J
 
 int AuboDriver::checkTargetAcc(JointVelcAccParam mLastJointVelc, JointVelcAccParam &mTargetJointVelc)
 {
+    const double ROBOT_WAYPOINT_DT = 0.002;
     JointVelcAccParam mJointAcc;
     for(int i = 0 ; i < ARM_DOF ; i++) {
-        mJointAcc.jointPara[i] = fabs(mTargetJointVelc.jointPara[i] - mLastJointVelc.jointPara[i]) / 0.005 ;
+        mJointAcc.jointPara[i] = fabs(mTargetJointVelc.jointPara[i] - mLastJointVelc.jointPara[i]) / ROBOT_WAYPOINT_DT;
         if(mJointAcc.jointPara[i] > MaxAcc[i]) {
-            ROS_INFO("Joint acc: (%f - %f)/0.005 = %f  ", mTargetJointVelc.jointPara[i], mLastJointVelc.jointPara[i], mJointAcc.jointPara[i]);
+            ROS_INFO("Joint acc: (%f - %f)/%.3f = %f  ", mTargetJointVelc.jointPara[i],
+                     mLastJointVelc.jointPara[i], ROBOT_WAYPOINT_DT, mJointAcc.jointPara[i]);
             ROS_INFO("Joint%d acc out of limit.", i + 1);
             return -1;
         }

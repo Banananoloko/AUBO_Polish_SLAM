@@ -9,14 +9,14 @@
 ### 前置检查清单
 - [ ] AUBO E5 机器人已上电
 - [ ] 示教器急停按钮已释放
-- [ ] 网络连接正常（机器人 IP: 192.168.1.10）
+- [ ] 网络连接正常（机器人 IP: 192.168.10.230）
 - [ ] 机器人周围 1 米内无障碍物和人员
 - [ ] 示教器无报警信息（connect modbus successfully）
 
 ### 快速启动命令
 ```bash
 # 1. 网络测试
-ping 192.168.1.10
+ping 192.168.10.230
 
 # 2. 系统验证
 cd ~/aubo_polish
@@ -26,7 +26,7 @@ cd ~/aubo_polish
 
 # 3a. 实机 + Gazebo 镜像（默认）
 source devel/setup.bash
-roslaunch aubo_linked_execution aubo_e5_linked_execution.launch robot_ip:=192.168.1.10
+roslaunch aubo_linked_execution aubo_e5_linked_execution.launch robot_ip:=192.168.10.230
 
 # 3b. 仅 Gazebo 仿真
 roslaunch aubo_linked_execution aubo_e5_linked_execution.launch sim_only:=true
@@ -35,7 +35,7 @@ roslaunch aubo_linked_execution aubo_e5_linked_execution.launch sim_only:=true
 roslaunch aubo_linked_execution aubo_e5_linked_execution.launch use_unity:=true sim_only:=true
 
 # 3d. 实机 + Unity 镜像
-roslaunch aubo_linked_execution aubo_e5_linked_execution.launch robot_ip:=192.168.1.10 use_unity:=true
+roslaunch aubo_linked_execution aubo_e5_linked_execution.launch robot_ip:=192.168.10.230 use_unity:=true
 ```
 
 ### 启动成功标志
@@ -59,7 +59,7 @@ roslaunch aubo_linked_execution aubo_e5_linked_execution.launch robot_ip:=192.16
 | 问题 | 快速解决 |
 |------|---------|
 | 启动超时 | 检查示教器急停是否释放 |
-| 网络连接失败 | `ping 192.168.1.10` 测试连通性 |
+| 网络连接失败 | `ping 192.168.10.230` 测试连通性 |
 | 大幅度运动警告 | 检查 RViz 位置是否与实机一致 |
 | Execute 失败 | 查看 `/safety_monitor/warning` 话题 |
 | Gazebo 不同步 | 检查 `/real/joint_states` 频率 (~10Hz) |
@@ -123,7 +123,7 @@ rosrun aubo_linked_execution test_obstacle_avoidance.py
 - [ ] AUBO E5 机器人已上电
 - [ ] 急停按钮已释放
 - [ ] 示教器无报警信息—— connect modbus successfully
-- [ ] 网络连接正常（机器人 IP 可 ping 通）IP: 192.168.1.10
+- [ ] 网络连接正常（机器人 IP 可 ping 通）IP: 192.168.10.230
 - [ ] 工作站已安装 ROS Noetic
 
 #### 1.2 软件环境验证
@@ -152,7 +152,7 @@ source devel/setup.bash
 
 ```bash
 roslaunch aubo_linked_execution aubo_e5_linked_execution.launch \
-    robot_ip:=192.168.1.10
+    robot_ip:=192.168.10.230
 ```
 
 **启动过程**（约 30 秒）：
@@ -348,7 +348,7 @@ evince frames.pdf
 **排查步骤**：
 1. 测试网络连通性：
    ```bash
-   ping 192.168.1.10
+   ping 192.168.10.230
    ```
 2. 检查防火墙：
    ```bash

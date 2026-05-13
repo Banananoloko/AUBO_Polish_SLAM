@@ -28,12 +28,14 @@ show_help() {
     echo "命令:"
     echo "  verify      - 验证系统完整性（环境、包、权限、依赖）"
     echo "  diagnose    - 诊断运行时状态（节点、话题、参数）"
+    echo "  monitor     - 实时监控 Unity/实机关节同步（需系统运行中）"
     echo "  fix-rpath   - 修复 AUBO SDK 动态库依赖问题"
     echo "  help        - 显示此帮助信息"
     echo ""
     echo "示例:"
     echo "  ./system_tools.sh verify"
     echo "  ./system_tools.sh diagnose"
+    echo "  ./system_tools.sh monitor"
     echo ""
 }
 
@@ -339,6 +341,87 @@ fix_rpath() {
 }
 
 # ============================================================
+# 功能 4: 实时监控 Unity/实机关节同步
+# ============================================================
+monitor_system() {
+    echo "=========================================="
+    echo "  AUBO E5 实时关节同步监控"
+    echo "  按 Ctrl+C 退出"
+    echo "=========================================="
+    echo ""
+
+    if ! rostopic list &> /dev/null; then
+        check_fail "ROS Master 未运行，请先启动系统"
+        exit 1
+    fi
+
+    echo -e "${BLUE}=== 节点存活检查 ===${NC}"
+    for node in aubo_driver unity_command_forwarder move_group linked_execution_action_server; do
+        if rosnode list 2>/dev/null | grep -q "$node"; then
+            check_pass "$node"
+        else
+            check_warn "$node 未运行"
+        fi
+    done
+    echo ""
+
+    echo -e "${BLUE}=== 话题频率（3 秒采样）===${NC}"
+    for topic in /real/joint_states /aubo_e5/joint_states /unity/joint_states; do
+        if rostopic list 2>/dev/null | grep -q "^${topic}$"; then
+            hz=$(timeout 3 rostopic hz "$topic" 2>/dev/null | grep "average rate" | awk '{print $3}')
+            [ -n "$hz" ] && check_pass "$topic (${hz} Hz)" || check_warn "$topic (无数据)"
+        else
+            check_warn "$topic 不存在"
+        fi
+    done
+    echo ""
+
+    echo -e "${BLUE}=== 实时关节对比（实机 vs Unity）===${NC}"
+    echo "按 Ctrl+C 退出"
+    echo ""
+    while true; do
+        REAL_POS=$(timeout 1 rostopic echo -n 1 /real/joint_states 2>/dev/null | grep -A 10 "position:" | grep -oE '[-0-9.]+' | head -6 | tr '\n' ' ')
+        UNITY_POS=$(timeout 1 rostopic echo -n 1 /unity/joint_states 2>/dev/null | grep -A 10 "position:" | grep -oE '[-0-9.]+' | head -6 | tr '\n' ' ')
+
+        echo -e "${GREEN}[$(date +%H:%M:%S)]${NC}"
+        if [ -n "$REAL_POS" ]; then
+            echo "  实机: $REAL_POS"
+        else
+            echo -e "  实机: ${RED}无数据${NC}"
+        fi
+        if [ -n "$UNITY_POS" ]; then
+            echo "  Unity: $UNITY_POS"
+        else
+            echo -e "  Unity: ${YELLOW}无数据${NC}"
+        fi
+
+        # 计算最大关节误差
+        REAL_ARR=($REAL_POS)
+        UNITY_ARR=($UNITY_POS)
+        if [ ${#REAL_ARR[@]} -eq 6 ] && [ ${#UNITY_ARR[@]} -eq 6 ]; then
+            MAX_ERR=0
+            for i in {0..5}; do
+                ERR=$(echo "${REAL_ARR[$i]} - ${UNITY_ARR[$i]}" | bc -l 2>/dev/null | sed 's/-//')
+                [ -z "$ERR" ] && continue
+                (( $(echo "$ERR > $MAX_ERR" | bc -l) )) && MAX_ERR=$ERR
+            done
+            MAX_ERR_DEG=$(echo "$MAX_ERR * 57.2958" | bc -l 2>/dev/null)
+            if [ -n "$MAX_ERR_DEG" ]; then
+                if (( $(echo "$MAX_ERR_DEG < 1.0" | bc -l) )); then
+                    echo -e "  最大误差: ${GREEN}${MAX_ERR_DEG:0:5}° (优秀)${NC}"
+                elif (( $(echo "$MAX_ERR_DEG < 5.0" | bc -l) )); then
+                    echo -e "  最大误差: ${YELLOW}${MAX_ERR_DEG:0:5}° (可接受)${NC}"
+                else
+                    echo -e "  最大误差: ${RED}${MAX_ERR_DEG:0:5}° (需优化)${NC}"
+                fi
+            fi
+        fi
+        echo ""
+        sleep 1
+    done
+}
+
+# ============================================================
 # 主程序
 # ============================================================
 case "${1:-}" in
@@ -347,6 +430,9 @@ case "${1:-}" in
         ;;
     diagnose)
         diagnose_system
+        ;;
+    monitor)
+        monitor_system
         ;;
     fix-rpath)
         fix_rpath

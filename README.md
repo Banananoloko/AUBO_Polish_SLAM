@@ -38,7 +38,7 @@ source devel/setup.bash
 
 # 2. 联动模式（实机 + Gazebo 镜像）
 roslaunch aubo_linked_execution aubo_e5_linked_execution.launch \
-    robot_ip:=192.168.1.10
+    robot_ip:=192.168.10.230
 
 # 3. 仿真模式（仅 Gazebo，无需实机）
 roslaunch aubo_linked_execution aubo_e5_linked_execution.launch \
@@ -48,9 +48,11 @@ roslaunch aubo_linked_execution aubo_e5_linked_execution.launch \
 roslaunch aubo_linked_execution aubo_e5_linked_execution.launch \
     use_unity:=true sim_only:=true
 
-# 5. 实机 + Unity 镜像模式
+# 5. 实机 + Unity 镜像模式（推荐）
 roslaunch aubo_linked_execution aubo_e5_linked_execution.launch \
-    robot_ip:=192.168.1.10 use_unity:=true
+    robot_ip:=192.168.10.230 use_unity:=true
+# 或直接使用启动脚本
+./start_p6.sh
 ```
 
 ### 基本操作
@@ -263,20 +265,18 @@ src/
 | **README.md**（本文档） | 项目架构、快速开始、系统概览 |
 | **OPERATION_GUIDE.md** | 实机操作、连续规划、故障排查 |
 | **docs/ARCHITECTURE.md** | 系统架构、数据流、Gazebo + Unity 对比 |
-| **docs/UNITY_MIGRATION.md** | Unity 迁移指南、调试命令 |
+| **docs/LINKED_EXECUTION_DESIGN.md** | 联动设计原理（含实现状态） |
 | **docs/MOTION_PLANNING.md** | 路径规划算法、参数配置 |
 | **docs/SAFETY_SYSTEM.md** | 安全机制详解、参数配置 |
 | **docs/TROUBLESHOOTING.md** | 常见问题快速排查 |
-| **docs/LINKED_EXECUTION_DESIGN.md** | 联动设计原理 |
-| **docs/PACKAGE_STRUCTURE.md** | 包结构详解 |
+| **docs/TEACH_PLAYBACK_GUIDE.md** | 示教-回放系统使用指南 |
 | **src/aubo_unity_bridge/README.md** | Unity 桥接包文档 |
 
 **推荐阅读路径**：
-- **新手**：README.md → OPERATION_GUIDE.md 快速参考
+- **新手**：README.md → OPERATION_GUIDE.md
 - **实机操作**：OPERATION_GUIDE.md
 - **系统设计**：docs/ARCHITECTURE.md → docs/LINKED_EXECUTION_DESIGN.md
 - **路径规划**：docs/MOTION_PLANNING.md
-- **Unity 集成**：docs/UNITY_MIGRATION.md → src/aubo_unity_bridge/README.md
 - **故障排查**：docs/TROUBLESHOOTING.md
 
 ---
@@ -291,4 +291,4 @@ src/
 **遇到问题？**
 1. 运行诊断工具：`./system_tools.sh diagnose`
 2. 查看操作指南：`OPERATION_GUIDE.md`
-3. 查看设计文档：`src/RViz_Real_Gazebo_Linked_Execution_Design.md`
+3. 查看故障排查：`docs/TROUBLESHOOTING.md`

@@ -75,11 +75,11 @@
 #define server_port 8899
 #define BIG_MODULE_RATIO 2 * M_PI / 60.0 / 121
 #define SMALL_MODULE_RATIO 2 * M_PI / 60.0 / 101
-#define VMAX 3000
+#define VMAX 1500
 //#define AMAX 10000
-#define AMAX 10000
+#define AMAX 5000
 //#define JMAX 40000
-#define JMAX 40000
+#define JMAX 20000
 #define STOP_DELAY_CLEAR_TIMES 100
 //#define LOG_INFO_DEBUG
 

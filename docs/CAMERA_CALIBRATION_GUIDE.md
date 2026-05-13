@@ -57,7 +57,7 @@ cd ~/aubo_polish
 
 # 实机模式
 roslaunch aubo_linked_execution aubo_e5_linked_execution.launch \
-    robot_ip:=192.168.1.10
+    robot_ip:=192.168.10.230
 
 # 或仿真模式
 roslaunch aubo_linked_execution aubo_e5_linked_execution.launch \
