@@ -7,9 +7,9 @@
   <param name="moveit_manage_controllers" value="$(arg moveit_manage_controllers)"/>
 
   <!-- When determining the expected duration of a trajectory, this multiplicative factor is applied to get the allowed duration of execution -->
-  <param name="trajectory_execution/allowed_execution_duration_scaling" value="3.0"/> <!-- Unity 优化：从 10.0 降低到 3.0 -->
+  <param name="trajectory_execution/allowed_execution_duration_scaling" value="8.0"/> <!-- 联动实机路径会按动态余量重定时，RViz 需给足等待预算 -->
   <!-- Allow more than the expected execution time before triggering a trajectory cancel (applied after scaling) -->
-  <param name="trajectory_execution/allowed_goal_duration_margin" value="2.0"/> <!-- Unity 优化：从 5.0 降低到 2.0 秒 -->
+  <param name="trajectory_execution/allowed_goal_duration_margin" value="8.0"/>
   <!-- Allowed joint-value tolerance for validation that trajectory's first point matches current robot state -->
   <param name="trajectory_execution/allowed_start_tolerance" value="0.15"/> <!-- Unity 优化：从 0.1 增加到 0.15 rad -->
 

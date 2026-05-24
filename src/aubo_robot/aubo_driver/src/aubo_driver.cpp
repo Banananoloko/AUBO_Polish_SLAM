@@ -102,6 +102,7 @@ AuboDriver::AuboDriver(int num = 0):delay_clear_times(0),buffer_size_(400),io_fl
     joint_states_pub_ = nh_.advertise<sensor_msgs::JointState>("joint_states", 3000);
     joint_feedback_pub_ = nh_.advertise<control_msgs::FollowJointTrajectoryFeedback>("feedback_states", 1000);
     joint_target_pub_ = nh_.advertise<std_msgs::Float32MultiArray>("/aubo_driver/real_pose", 500);
+    cartesian_pose_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("/aubo_driver/current_pose", 50);
     robot_status_pub_ = nh_.advertise<industrial_msgs::RobotStatus>("robot_status", 1000);
     io_pub_ = nh_.advertise<aubo_msgs::IOState>("/aubo_driver/io_states", 10);
     rib_pub_ = nh_.advertise<std_msgs::Int32MultiArray>("/aubo_driver/rib_status", 1000);
@@ -157,6 +158,18 @@ void AuboDriver::timerCallback(const ros::TimerEvent& e)
             for(int i = 0; i < 6; i++)
                 joints[i] = rs.wayPoint_.jointpos[i];
             setCurrentPosition(joints);  // update the current robot joint states to ROS Controller
+
+            geometry_msgs::PoseStamped cartesian_pose;
+            cartesian_pose.header.stamp = ros::Time::now();
+            cartesian_pose.header.frame_id = "base_link";
+            cartesian_pose.pose.position.x = rs.wayPoint_.cartPos.position.x;
+            cartesian_pose.pose.position.y = rs.wayPoint_.cartPos.position.y;
+            cartesian_pose.pose.position.z = rs.wayPoint_.cartPos.position.z;
+            cartesian_pose.pose.orientation.x = rs.wayPoint_.orientation.x;
+            cartesian_pose.pose.orientation.y = rs.wayPoint_.orientation.y;
+            cartesian_pose.pose.orientation.z = rs.wayPoint_.orientation.z;
+            cartesian_pose.pose.orientation.w = rs.wayPoint_.orientation.w;
+            cartesian_pose_pub_.publish(cartesian_pose);
 
             /** Get the buff size of thr rib **/
             robot_receive_service_.robotServiceGetRobotDiagnosisInfo(rs.robot_diagnosis_info_);
@@ -880,8 +893,44 @@ std::vector<aubo_robot_namespace::wayPoint_S> AuboDriver::tryPopWaypoint(int cou
     uint8_t same_point = 0;
     std::vector<aubo_robot_namespace::wayPoint_S> wayPointVector;
     aubo_robot_namespace::wayPoint_S wp;
-    std::array<double, 6> joint;  
+    std::array<double, 6> joint;
     std::array<double, 6> interpolation_joint;
+
+    // --- velocity diagnostics (gated by rosparam, cached 5s) ---
+    static bool     _vel_diag_enable = false;
+    static double   _vel_diag_warn[6] = {0.5, 0.5, 0.5, 0.6, 0.6, 0.6};
+    static double   _safe_vel_limit[6] = {0.5, 0.5, 0.5, 0.6, 0.6, 0.6};
+    static double   _max_waypoint_delta = 0.05;
+    static bool     _reject_overspeed_waypoints = true;
+    static ros::Time _vel_diag_last_read;
+    ros::Time now = ros::Time::now();
+    if ((now - _vel_diag_last_read).toSec() > 5.0) {
+        _vel_diag_last_read = now;
+        ros::param::get("/aubo_driver/velocity_diag_enable", _vel_diag_enable);
+        ros::param::get("/aubo_driver/max_waypoint_delta", _max_waypoint_delta);
+        ros::param::get("/aubo_driver/reject_overspeed_waypoints", _reject_overspeed_waypoints);
+        std::vector<double> safe_vec;
+        if (ros::param::get("/aubo_driver/velocity_safe_limits", safe_vec) && safe_vec.size() >= 6) {
+            for (int j = 0; j < 6; j++) _safe_vel_limit[j] = safe_vec[j];
+        }
+        if (_vel_diag_enable) {
+            std::vector<double> warn_vec;
+            if (ros::param::get("/aubo_driver/velocity_diag_warn_levels", warn_vec) && warn_vec.size() >= 6) {
+                for (int j = 0; j < 6; j++) _vel_diag_warn[j] = warn_vec[j];
+            }
+        }
+    }
+    bool   vel_diag_enable   = _vel_diag_enable;
+    const double (&vel_diag_warn)[6] = _vel_diag_warn;
+    const double (&safe_vel_limit)[6] = _safe_vel_limit;
+    const double max_waypoint_delta = _max_waypoint_delta;
+    const bool reject_overspeed_waypoints = _reject_overspeed_waypoints;
+    int    vel_diag_wp_count = 0;
+    double vel_diag_max_vel[6] = {0.0};
+    double vel_diag_max_dpos[6] = {0.0};
+    int    vel_diag_warn_joint = -1;
+    double vel_diag_warn_value = 0.0;
+    // --- end velocity diagnostics ---
 
     for(int i = 0; i < count; i++) {
         if(ros_motion_queue_.try_dequeue(joint)) {
@@ -899,26 +948,88 @@ std::vector<aubo_robot_namespace::wayPoint_S> AuboDriver::tryPopWaypoint(int cou
                 // joint_filter_: current joint
                 // joint :        target joint. next point
                 if(0X3F != same_point) {
+                    double max_delta = 0.0;
+                    int max_delta_joint = -1;
+                    for(int j = 0 ; j < 6 ; j++) {
+                        double dpos = fabs(joint[j] - joint_filter_[j]);
+                        if(dpos > max_delta) {
+                            max_delta = dpos;
+                            max_delta_joint = j;
+                        }
+                    }
+                    if(max_delta > max_waypoint_delta) {
+                        ROS_ERROR("Rejecting trajectory: waypoint jump on joint %d is %.6f rad > %.6f rad. Clearing queues to avoid joint target speed out-of-range.",
+                                  max_delta_joint, max_delta, max_waypoint_delta);
+                        std_msgs::UInt8 cancel;
+                        cancel.data = 1;
+                        cancle_trajectory_pub_.publish(cancel);
+                        {
+                            std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+                            start_move_ = false;
+                            while(!buf_queue_.empty())
+                                buf_queue_.pop();
+                        }
+                        std::array<double, 6> dropped_joint;
+                        while(ros_motion_queue_.try_dequeue(dropped_joint)) {}
+                        for(int j = 0; j < ARM_DOF; j++) {
+                            last_joint_velc_.jointPara[j] = 0.0;
+                            target_joint_velc_.jointPara[j] = 0.0;
+                        }
+                        wayPointVector.clear();
+                        return wayPointVector;
+                    }
+
                     // Robot MAC executes each waypoint in 2ms (500Hz servo loop), NOT 5ms.
                     // Using 0.002 so the interpolation limit matches what the robot actually enforces.
                     const double ROBOT_WAYPOINT_DT = 0.002;
                     //Check if the speed exceeds the limit.
                     double max_ratio = 1.0;
+                    int overspeed_joint = -1;
+                    double overspeed_value = 0.0;
+                    double overspeed_limit = 0.0;
                     for(int i = 0 ; i < 6 ; i++) {
                         target_joint_velc_.jointPara[i] = fabs(joint[i] - joint_filter_[i]) / ROBOT_WAYPOINT_DT;
-                        if(target_joint_velc_.jointPara[i] > MaxVelc[i]) {
-                            double ratio = target_joint_velc_.jointPara[i] / MaxVelc[i];
+                        double limit = std::min(MaxVelc[i], safe_vel_limit[i]);
+                        if(target_joint_velc_.jointPara[i] > limit) {
+                            double ratio = target_joint_velc_.jointPara[i] / limit;
                             if(ratio > max_ratio) {
                                 max_ratio = ratio;
                             }
-                            ROS_WARN("Joint %d velocity %.3f rad/s exceeds limit %.3f rad/s (ratio: %.2f)",
-                                     i, target_joint_velc_.jointPara[i], MaxVelc[i], ratio);
+                            ROS_WARN("Joint %d velocity %.3f rad/s exceeds safe limit %.3f rad/s (hardware %.3f rad/s, ratio: %.2f)",
+                                     i, target_joint_velc_.jointPara[i], limit, MaxVelc[i], ratio);
                             over_speed_flag_ = true;
+                            if(target_joint_velc_.jointPara[i] > overspeed_value) {
+                                overspeed_joint = i;
+                                overspeed_value = target_joint_velc_.jointPara[i];
+                                overspeed_limit = limit;
+                            }
                         }
                     }
 
                     if(over_speed_flag_){
                         over_speed_flag_ = false;
+                        if(reject_overspeed_waypoints) {
+                            double dpos = overspeed_value * ROBOT_WAYPOINT_DT;
+                            ROS_ERROR("Rejecting trajectory: joint %d target velocity %.3f rad/s > safe limit %.3f rad/s (delta %.6f rad over %.3fs). Clearing queues and canceling simulator stream before CAN send.",
+                                      overspeed_joint, overspeed_value, overspeed_limit, dpos, ROBOT_WAYPOINT_DT);
+                            std_msgs::UInt8 cancel;
+                            cancel.data = 1;
+                            cancle_trajectory_pub_.publish(cancel);
+                            {
+                                std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+                                start_move_ = false;
+                                while(!buf_queue_.empty())
+                                    buf_queue_.pop();
+                            }
+                            std::array<double, 6> dropped_joint;
+                            while(ros_motion_queue_.try_dequeue(dropped_joint)) {}
+                            for(int j = 0; j < ARM_DOF; j++) {
+                                last_joint_velc_.jointPara[j] = 0.0;
+                                target_joint_velc_.jointPara[j] = 0.0;
+                            }
+                            wayPointVector.clear();
+                            return wayPointVector;
+                        }
                         // 使用最大超限比例计算插补点数，确保所有关节都在限制内
                         int n_equalpart = ceil(max_ratio) + 1;  // +1 确保安全裕度
                         ROS_INFO("Interpolating into %d segments to satisfy velocity limits", n_equalpart);
@@ -932,6 +1043,22 @@ std::vector<aubo_robot_namespace::wayPoint_S> AuboDriver::tryPopWaypoint(int cou
                             wayPointVector.push_back(wp);
                         }
                     }
+
+                    // --- velocity diagnostics: track per-batch stats ---
+                    if (vel_diag_enable) {
+                        vel_diag_wp_count++;
+                        for (int j = 0; j < 6; j++) {
+                            double dpos = fabs(joint[j] - joint_filter_[j]);
+                            if (dpos > vel_diag_max_dpos[j]) vel_diag_max_dpos[j] = dpos;
+                            double vel_est = target_joint_velc_.jointPara[j];
+                            if (vel_est > vel_diag_max_vel[j]) vel_diag_max_vel[j] = vel_est;
+                            if (vel_est > vel_diag_warn[j] && vel_est > vel_diag_warn_value) {
+                                vel_diag_warn_value = vel_est;
+                                vel_diag_warn_joint = j;
+                            }
+                        }
+                    }
+                    // --- end velocity diagnostics ---
 
                     //Check if the acceleration exceeds the limit.
                     for(int i = 0 ; i < 6 ; i++) {
@@ -964,6 +1091,27 @@ std::vector<aubo_robot_namespace::wayPoint_S> AuboDriver::tryPopWaypoint(int cou
         }
     }
 
+    // --- velocity diagnostics: batch summary ---
+    if (vel_diag_enable && vel_diag_wp_count > 0) {
+        ROS_INFO_THROTTLE(2.0,
+            "[vel-diag] batch %d wp | "
+            "J0 Δ=%.5f v=%.3f  J1 Δ=%.5f v=%.3f  J2 Δ=%.5f v=%.3f  "
+            "J3 Δ=%.5f v=%.3f  J4 Δ=%.5f v=%.3f  J5 Δ=%.5f v=%.3f",
+            vel_diag_wp_count,
+            vel_diag_max_dpos[0], vel_diag_max_vel[0],
+            vel_diag_max_dpos[1], vel_diag_max_vel[1],
+            vel_diag_max_dpos[2], vel_diag_max_vel[2],
+            vel_diag_max_dpos[3], vel_diag_max_vel[3],
+            vel_diag_max_dpos[4], vel_diag_max_vel[4],
+            vel_diag_max_dpos[5], vel_diag_max_vel[5]);
+        if (vel_diag_warn_joint >= 0) {
+            ROS_WARN_THROTTLE(1.0,
+                "[vel-diag] joint %d velocity %.3f rad/s exceeds configurable warn level %.3f rad/s",
+                vel_diag_warn_joint, vel_diag_warn_value, vel_diag_warn[vel_diag_warn_joint]);
+        }
+    }
+    // --- end velocity diagnostics ---
+
     return wayPointVector;
 }
 
@@ -994,9 +1142,23 @@ void AuboDriver::publishWaypointToRobot()
             } else {
                 sync_retry_count++;
                 if(sync_retry_count >= MAX_SYNC_RETRIES) {
-                    ROS_ERROR("Failed to synchronize joint_filter_ after %d retries, giving up", MAX_SYNC_RETRIES);
-                    need_sync_filter_.store(false, std::memory_order_release);  // 放弃同步
+                    ROS_ERROR("Failed to synchronize joint_filter_ after %d retries; dropping pending trajectory to avoid stale-reference overspeed", MAX_SYNC_RETRIES);
+                    {
+                        std::lock_guard<std::mutex> lock(queue_mutex_);
+                        start_move_ = false;
+                        while(!buf_queue_.empty())
+                            buf_queue_.pop();
+                    }
+                    std::array<double, 6> dropped_joint;
+                    while(ros_motion_queue_.try_dequeue(dropped_joint)) {}
+                    for(int i = 0; i < ARM_DOF; i++) {
+                        last_joint_velc_.jointPara[i] = 0.0;
+                        target_joint_velc_.jointPara[i] = 0.0;
+                    }
+                    need_sync_filter_.store(false, std::memory_order_release);
                     sync_retry_count = 0;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                    continue;
                 } else {
                     ROS_WARN("Failed to synchronize joint_filter_ (code: %d), retry %d/%d",
                              ret, sync_retry_count, MAX_SYNC_RETRIES);
@@ -1152,4 +1314,3 @@ bool AuboDriver::getIK(aubo_msgs::GetIKRequest& req, aubo_msgs::GetIKResponse& r
 }
 
 }
-

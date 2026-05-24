@@ -1,4 +1,4 @@
-# joint_limits.yaml — AUBO E5 calibrated to ~24% of hardware limits.
+# joint_limits.yaml — AUBO E5 calibrated to ~26% of hardware velocity limits.
 # Hardware max (from aubo_driver.cpp MaxVelc/MaxAcc):
 #   Joints 1-3:  2.596 rad/s,  17.309 rad/s^2
 #   Joints 4-6:  3.110 rad/s,  20.737 rad/s^2
@@ -6,11 +6,13 @@
 # These are the SINGLE source of safety truth — applied to ALL paths
 # (both square_demo TUI and RViz Plan & Execute).
 #
-# Effective velocity at robot:
-#   RViz path:       limits_vel × 1.0(no MoveIt scaling) × 0.5(velocity_scale_factor) × 2.5(timing) = 24% HW
-#   Square demo:     limits_vel × 1.0(VELOCITY_SCALING=1.0) × 0.5 × 2.5 = 24% HW
-#   = 0.5 × 0.5 × 2.5 = 0.625 rad/s (24% HW, joints 1-3)
-#   = 0.6 × 0.5 × 2.5 = 0.750 rad/s (24% HW, joints 4-6)
+# Effective velocity before linked_execution retiming:
+#   RViz path:       limits_vel × 1.0(no MoveIt scaling) × 0.58(velocity_scale_factor) × 2.5(timing)
+#   Square demo:     limits_vel × 1.0(VELOCITY_SCALING=1.0) × 0.58 × 2.5
+#   = 0.5 × 0.58 × 2.5 = 0.725 rad/s (~28% HW, joints 1-3)
+#   = 0.6 × 0.58 × 2.5 = 0.870 rad/s (~28% HW, joints 4-6)
+# linked_execution_action_server.py additionally retimes RViz trajectories
+# when predicted real acceleration exceeds the configured dynamic guard.
 joint_limits:
   shoulder_joint:
     has_velocity_limits: true

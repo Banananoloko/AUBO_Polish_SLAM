@@ -10,13 +10,14 @@
   <arg name="robot_ip"  default="192.168.1.10" doc="IP address of the AUBO E5 real robot"/>
   <arg name="sim_only"  default="false" doc="Set true to run sim+RViz without a real robot"/>
   <arg name="use_unity" default="false" doc="Use Unity simulator instead of Gazebo"/>
+  <arg name="velocity_scale_factor" default="0.58"
+       doc="Unified low-level trajectory speed scale used by both RViz and terminal demos"/>
 
   <!-- 全局参数：轨迹速度缩放因子，aubo_robot_simulator 在 trajectory_callback 中读取。
-       scale < 1 时同时降低速度值并扩展时间戳，使插补点更密集、Δpos 更小，
-       从而补偿机器人内部控制周期（约2ms）与模拟器插补周期（5ms）之间的时序不匹配。
-       计算公式: robot_vel ≈ moveit_vel × scale × (5ms / T_robot)
-       0.5 为保守起始值，测试通过后可逐步上调到 0.7-0.8。 -->
-  <param name="/aubo_controller/velocity_scale_factor" value="0.5"/>
+       scale < 1 时同时降低速度值并扩展时间戳；模拟器采样频率设置为 500 Hz，
+       与实机 MAC 约 2ms 的路点消费周期对齐，避免 200 Hz→500 Hz 的差分速度放大。
+       最终仍由 linked_execution_action_server 和 aubo_driver 的硬限速二次夹住。 -->
+  <param name="/aubo_controller/velocity_scale_factor" value="$(arg velocity_scale_factor)"/>
 
   <!-- A. MoveIt 基础层 -->
   <include file="$(find aubo_e5_moveit_config)/launch/planning_context.launch">
@@ -84,7 +85,9 @@
   <node if="$(arg sim_only)"
         pkg="aubo_controller" type="aubo_robot_simulator"
         name="aubo_robot_simulator" output="screen">
-    <param name="/aubo_controller/velocity_scale_factor" value="0.5"/>
+    <param name="/aubo_controller/velocity_scale_factor" value="$(arg velocity_scale_factor)"/>
+    <param name="motion_update_rate" value="500.0"/>
+    <param name="robot_waypoint_dt" value="0.002"/>
   </node>
 
   <!-- 联动模式：模拟器的 feedback/joint_states/robot_status 隔离到 sim/ 前缀，
@@ -98,7 +101,7 @@
 
        注意2：joint_path_command 不能隔离 — aubo_driver 订阅的是 moveItController_cmd
        (JointTrajectoryPoint)，aubo_robot_simulator 是两者之间的插值桥：
-       joint_path_command(JointTrajectory) → 5阶多项式插值 → moveItController_cmd，
+       joint_path_command(JointTrajectory) → 500 Hz 线性插值 → moveItController_cmd，
        若切断此桥则实机永远收不到路点数据。 -->
   <node unless="$(arg sim_only)"
         pkg="aubo_controller" type="aubo_robot_simulator"
@@ -106,13 +109,24 @@
     <remap from="feedback_states" to="sim/feedback_states"/>
     <remap from="joint_states"    to="sim/joint_states"/>
     <remap from="robot_status"    to="sim/robot_status"/>
-    <param name="/aubo_controller/velocity_scale_factor" value="0.5"/>
+    <param name="/aubo_controller/velocity_scale_factor" value="$(arg velocity_scale_factor)"/>
+    <param name="motion_update_rate" value="500.0"/>
+    <param name="robot_waypoint_dt" value="0.002"/>
   </node>
+
+  <!-- Driver-side hard guards are global because aubo_driver reads them with
+       absolute /aubo_driver/* names from the streaming thread. -->
+  <rosparam param="/aubo_driver/velocity_safe_limits">[0.5, 0.5, 0.5, 0.6, 0.6, 0.6]</rosparam>
+  <rosparam param="/aubo_driver/max_waypoint_delta">0.05</rosparam>
+  <rosparam param="/aubo_driver/reject_overspeed_waypoints">true</rosparam>
 
   <!-- D. 实机驱动层（仅联动模式） -->
   <node unless="$(arg sim_only)"
         pkg="aubo_driver" type="aubo_driver" name="aubo_driver" output="screen">
     <param name="server_host" value="$(arg robot_ip)"/>
+    <!-- Driver-side hard guard: reject sparse/jumped waypoints instead of
+         interpolating them into CAN commands that can trip pendant target-speed
+         protection. Safe velocity limits are intentionally below hardware max. -->
   </node>
 
   <!-- 实机上电和控制模式切换 -->
@@ -155,7 +169,7 @@
         name="linked_execution_monitor" output="screen">
     <param name="joint_tolerance" value="0.05"/>   <!-- 降低到 0.05 rad，更严格 -->
     <param name="success_cycles" value="3"/>       <!-- 增加到 3 个周期，确保稳定 -->
-    <param name="timeout_margin" value="8.0"/>     <!-- 增加到 8 秒 -->
+    <param name="timeout_margin" value="150.0"/>   <!-- 长慢轨迹下避免监视器早于实机执行超时 -->
   </node>
 
   <node unless="$(arg sim_only)"
@@ -163,6 +177,15 @@
         name="linked_execution_action_server" output="screen">
     <param name="real_server_wait_timeout" value="30.0"/>
     <param name="safety_watchdog_timeout" value="5.0"/>
+    <param name="trajectory_start_tolerance" value="0.15"/>
+    <param name="joint_jump_threshold" value="0.35"/>
+    <param name="max_retime_scale" value="6.0"/>
+    <param name="simulator_sample_dt" value="0.002"/>
+    <param name="robot_waypoint_dt" value="0.002"/>
+    <param name="real_timeout_scale" value="3.0"/>
+    <param name="real_timeout_margin" value="30.0"/>
+    <rosparam param="max_robot_velocity">[0.5, 0.5, 0.5, 0.6, 0.6, 0.6]</rosparam>
+    <rosparam param="max_robot_acceleration">[2.0, 2.0, 2.0, 2.4, 2.4, 2.4]</rosparam>
   </node>
 
 </launch>

@@ -61,6 +61,7 @@
 #include <aubo_msgs/Analog.h>
 #include <aubo_msgs/JointPos.h>
 #include <industrial_msgs/RobotStatus.h>
+#include <geometry_msgs/PoseStamped.h>
 #include "aubo_driver/AuboRobotMetaType.h"
 #include "aubo_driver/serviceinterface.h"
 #include "aubo_driver/readerwriterqueue.h"
@@ -171,6 +172,7 @@ namespace aubo_driver
             ros::Publisher joint_states_pub_;
             ros::Publisher joint_feedback_pub_;
             ros::Publisher joint_target_pub_;
+            ros::Publisher cartesian_pose_pub_;
             ros::Publisher robot_status_pub_;
             ros::Subscriber teach_subs_;
             ros::Subscriber moveAPI_subs_;

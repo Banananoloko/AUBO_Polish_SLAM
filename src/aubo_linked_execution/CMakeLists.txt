@@ -13,5 +13,8 @@ catkin_install_python(PROGRAMS
   scripts/continuous_motion_demo.py
   scripts/obstacle_spawner.py
   scripts/test_obstacle_avoidance.py
+  scripts/square_demo_control.py
+  scripts/square_demo_gui.py
+  scripts/emergency_stop.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
