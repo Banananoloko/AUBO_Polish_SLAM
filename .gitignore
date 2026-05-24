@@ -26,6 +26,11 @@ data/
 
 # Diagnostic logs
 diagnostic_logs/
+logs/
+system_logs/
+*.log
+*.log.*
+*.csv
 
 # Unity import assets (contains external project files)
 codex_unity_import/
@@ -42,6 +47,26 @@ openspec/
 .claude/
 .codex
 .catkin_tools/
+.env
+.env.*
+*.local
+
+# ============================================================
+# Secrets / credentials
+# ============================================================
+*secret*
+*secrets*
+*token*
+*credential*
+*credentials*
+*.pem
+*.ppk
+*.p12
+*.pfx
+*.key
+id_rsa*
+id_ed25519*
+known_hosts
 
 # ============================================================
 # Nested git repos (converted to regular directories)

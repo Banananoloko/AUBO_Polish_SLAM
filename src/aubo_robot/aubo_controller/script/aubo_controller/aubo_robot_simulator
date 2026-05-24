@@ -33,6 +33,7 @@ import copy
 import threading
 import sys
 import os
+import math
 path = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0,path)
 print(path)
@@ -108,6 +109,13 @@ class MotionControllerSimulator():
         rospy.logdebug("Setting initial joint state: %s", str(initial_joint_state))
         self.joint_velocities = [0]*num_joints
         self.joint_accelerations = [0]*num_joints
+        self.last_stream_positions = list(self.joint_positions)
+        self.robot_waypoint_dt = rospy.get_param('~robot_waypoint_dt', 0.002)
+        self.stream_guard_enabled = rospy.get_param('~stream_guard_enabled', True)
+        self.safe_velocity_limits = self._get_float_list_param(
+            '/aubo_driver/velocity_safe_limits',
+            [0.5, 0.5, 0.5, 0.6, 0.6, 0.6],
+            num_joints)
 
         self.ribBufferSize = 0
         self.ControllerConnectedFlag = 1
@@ -133,6 +141,60 @@ class MotionControllerSimulator():
         self.motion_thread = threading.Thread(target=self._motion_worker)
         self.motion_thread.daemon = True
         self.motion_thread.start()
+
+    @staticmethod
+    def _get_float_list_param(name, default, count):
+        values = rospy.get_param(name, default)
+        try:
+            values = [float(v) for v in values]
+        except (TypeError, ValueError):
+            rospy.logwarn('Invalid %s, using default %s', name, default)
+            values = list(default)
+        if len(values) < count:
+            values = list(values) + list(default[len(values):count])
+        return values[:count]
+
+    def _unsafe_stream_reason(self, positions):
+        if not self.stream_guard_enabled:
+            return ''
+        if not positions or len(positions) != len(self.last_stream_positions):
+            return 'invalid stream point dimension'
+        robot_dt = max(0.0005, float(self.robot_waypoint_dt))
+        worst_joint = -1
+        worst_velocity = 0.0
+        worst_limit = 0.0
+        worst_delta = 0.0
+        for idx, (last, target) in enumerate(zip(self.last_stream_positions, positions)):
+            delta = abs(target - last)
+            velocity = delta / robot_dt
+            limit = self.safe_velocity_limits[idx]
+            if velocity > limit and velocity > worst_velocity:
+                worst_joint = idx
+                worst_velocity = velocity
+                worst_limit = limit
+                worst_delta = delta
+        if worst_joint >= 0:
+            return ('joint %d stream velocity %.3f rad/s > %.3f rad/s '
+                    '(delta %.6f rad over %.3fs)' %
+                    (worst_joint, worst_velocity, worst_limit,
+                     worst_delta, robot_dt))
+        return ''
+
+    def _stream_substep_count(self, positions):
+        if not self.stream_guard_enabled:
+            return 1
+        if not positions or len(positions) != len(self.last_stream_positions):
+            return -1
+
+        robot_dt = max(0.0005, float(self.robot_waypoint_dt))
+        substeps = 1
+        for idx, (last, target) in enumerate(zip(self.last_stream_positions, positions)):
+            limit = self.safe_velocity_limits[idx]
+            if limit <= 0.0:
+                continue
+            max_delta = max(1e-6, limit * robot_dt * 0.8)
+            substeps = max(substeps, int(math.ceil(abs(target - last) / max_delta)))
+        return substeps
 
     """
     Update the joint position from extern controller.
@@ -178,6 +240,7 @@ class MotionControllerSimulator():
                     # 按标准顺序重排位置
                     with self.lock:
                         self.joint_positions = [position_map[name] for name in self.joint_names]
+                        self.last_stream_positions = list(self.joint_positions)
                     rospy.logdebug_throttle(1.0, 'Synced with sim backend: %s', str(self.joint_positions))
                 else:
                     rospy.logerr_once('joint_names not set, cannot sync joint states safely')
@@ -190,8 +253,7 @@ class MotionControllerSimulator():
     def Is_cancel_trajectory_callback(self, msg_in):
         self.cancle_trajectory = msg_in.data
         if self.cancle_trajectory == 1:
-            if not self.motion_buffer.empty():
-                self._clear_buffer()
+            self.stop()
             self.cancle_trajectory = 0
         rospy.loginfo('is cancel trajectory status %d' , self.cancle_trajectory)
 
@@ -199,6 +261,21 @@ class MotionControllerSimulator():
     def add_motion_waypoint(self, point):
     # When add new trajectory into the buffer, here need to handle the accelerations!!
         self.motion_buffer.put(point)
+
+    def prepare_new_trajectory(self, first_point):
+        """Reset per-trajectory streaming state before the first waypoint.
+
+        The first point of a FollowJointTrajectory is the already-validated
+        start state.  It must be treated as the stream baseline; comparing it
+        against the simulator's zero startup pose makes every real-robot start
+        look like an enormous velocity jump and prevents any point reaching the
+        driver.
+        """
+        with self.lock:
+            self.sig_stop = False
+            self.cancle_trajectory = 0
+            if first_point and len(first_point.positions) == len(self.joint_positions):
+                self.last_stream_positions = list(first_point.positions)
 
     def get_joint_positions(self):
         with self.lock:
@@ -272,26 +349,50 @@ class MotionControllerSimulator():
     def _move_to(self, point, dur):
         # Back-pressure: block if driver buffer is full.
         while self.ribBufferSize > self.MinimumBufferSize:
-            rospy.sleep(dur)
-
-        # Always sleep to enforce the 200Hz publish rate.
-        # Without this the Python loop runs at CPU speed, delivering the entire
-        # trajectory to buf_queue_ in milliseconds.  The driver then sends a
-        # burst to the robot MAC buffer; the robot executes each waypoint at its
-        # 2ms servo tick, so a 5ms-spaced position step arrives in 2ms →
-        # velocity × 2.5 at the robot → guaranteed overspeed.
-        rospy.sleep(dur)
+            rospy.sleep(max(dur, 0.001))
 
         with self.lock:
-            if not self.sig_stop:
-                self.joint_positions = point.positions
-                self.joint_velocities = point.velocities
-                self.joint_accelerations = point.accelerations
-                # self.joint_state_publisher()                #publish the control command to the robot
-                # rospy.logdebug('Moved to position: %s in %s', str(self.joint_positions), str(dur))
-            else:
+            if self.sig_stop:
                 rospy.loginfo('Stopping motion immediately, clearing stop signal')
                 self.sig_stop = False
+                return False
+            start_positions = list(self.last_stream_positions)
+            substeps = self._stream_substep_count(point.positions)
+
+        if substeps < 0:
+            rospy.logerr('Rejecting simulator stream point before driver: invalid stream point dimension. Clearing trajectory.')
+            self._clear_buffer()
+            return False
+
+        robot_dt = max(0.0005, float(self.robot_waypoint_dt))
+        if substeps > 1:
+            rospy.logwarn_throttle(
+                1.0,
+                'Splitting simulator stream jump into %d safe %.3fs substeps before driver',
+                substeps, robot_dt)
+
+        step_sleep = max(robot_dt, float(dur) / substeps) if substeps > 1 else max(float(dur), 0.0)
+        for step in range(1, substeps + 1):
+            rospy.sleep(step_sleep)
+            alpha = float(step) / float(substeps)
+            next_positions = [
+                start + alpha * (target - start)
+                for start, target in zip(start_positions, point.positions)
+            ]
+
+            with self.lock:
+                if self.sig_stop:
+                    rospy.loginfo('Stopping motion immediately, clearing stop signal')
+                    self.sig_stop = False
+                    return False
+                self.last_stream_positions = list(next_positions)
+                self.joint_positions = list(next_positions)
+                self.joint_velocities = list(point.velocities)
+                self.joint_accelerations = list(point.accelerations)
+
+            if substeps > 1:
+                self.joint_state_publisher()
+        return True
 
     def _motion_worker(self):
         # first update the robot real postion
@@ -332,11 +433,16 @@ class MotionControllerSimulator():
                                     len(last_goal_point.velocities) == N and
                                     len(current_goal_point.velocities) == N)
 
+                    stopped = False
                     if self.update_rate > 0:
-                        tt = last_goal_point.time_from_start.to_sec()
+                        start_t = last_goal_point.time_from_start.to_sec()
+                        end_t = current_goal_point.time_from_start.to_sec()
+                        update_step = update_duration.to_sec()
+                        last_stream_t = start_t
+                        tt = start_t + update_step
 
-                        while ((tt < current_goal_point.time_from_start.to_sec()) and (0 == self.cancle_trajectory)):
-                            alpha = (tt - last_goal_point.time_from_start.to_sec()) / T if T > 0 else 0.0
+                        while ((tt < end_t) and (0 == self.cancle_trajectory)):
+                            alpha = (tt - start_t) / T if T > 0 else 0.0
                             for i in range(N):
                                 intermediate_goal_point.positions[i] = (
                                     last_goal_point.positions[i] +
@@ -349,13 +455,23 @@ class MotionControllerSimulator():
                                 else:
                                     intermediate_goal_point.velocities[i] = 0.0
                                 intermediate_goal_point.accelerations[i] = 0.0
-                            tt = tt + update_duration.to_sec()
-                            self._move_to(intermediate_goal_point, update_duration.to_sec())
+                            if not self._move_to(intermediate_goal_point, tt - last_stream_t):
+                                stopped = True
+                                break
                             self.joint_state_publisher()
+                            last_stream_t = tt
+                            tt = tt + update_step
 
-                        move_duration = current_goal_point.time_from_start.to_sec() - tt
+                        move_duration = rospy.Duration(max(0.0, end_t - last_stream_t))
+                    else:
+                        move_duration = rospy.Duration(T)
 
-                self._move_to(current_goal_point, move_duration)
+                    if stopped or self.cancle_trajectory:
+                        self.cancle_trajectory = 0
+                        continue
+
+                if not self._move_to(current_goal_point, move_duration.to_sec()):
+                    continue
                 self.joint_state_publisher()
                 last_goal_point = copy.deepcopy(current_goal_point)
 
@@ -413,7 +529,9 @@ class AuboRobotSimulatorNode():
         num_joints = len(self.joint_names)
 
         # retrieve update rate
-        motion_update_rate = rospy.get_param('motion_update_rate', 200.)  # set param to 0 to ignore interpolated motion
+        motion_update_rate = rospy.get_param(
+            '~motion_update_rate',
+            rospy.get_param('motion_update_rate', 200.))  # set param to 0 to ignore interpolated motion
         self.motion_ctrl = MotionControllerSimulator(num_joints, update_rate=motion_update_rate)
 
         self.velocity_scale_factor = rospy.get_param('/aubo_controller/velocity_scale_factor', 1.0)
@@ -553,8 +671,14 @@ class AuboRobotSimulatorNode():
     @type  msg_in: JointTrajectory
     """
     def trajectory_callback(self, msg_in):
-        if (len(msg_in.points) == 0) or (self.EnableFlag == 0):
-            # if the JointTrajectory is null or the robot is controlled by other controller.
+        if len(msg_in.points) == 0:
+            rospy.loginfo('Received empty trajectory, stopping current stream and clearing buffer')
+            self.motion_ctrl.stop()
+            rospy.logdebug('Exiting trajectory callback')
+            return
+
+        if self.EnableFlag == 0:
+            # if the robot is controlled by other controller.
             pass
         else:
             rospy.logdebug('handle joint_path_command')
@@ -577,9 +701,16 @@ class AuboRobotSimulatorNode():
                     self.velocity_scale_factor = rospy.get_param('/aubo_controller/velocity_scale_factor', 1.0)
                     rospy.loginfo('The velocity scale factor is: %s', str(self.velocity_scale_factor))
                     new_traj = scale_trajectory_speed(msg_in, self.velocity_scale_factor)
+                    remapped_points = []
                     for point in new_traj.points:
                         # first remaps point to controller joint order, the add the point to the controller.
                         point = self._to_controller_order(msg_in.joint_names, point)
+                        remapped_points.append(point)
+
+                    if remapped_points:
+                        self.motion_ctrl.prepare_new_trajectory(remapped_points[0])
+
+                    for point in remapped_points:
                         self.motion_ctrl.add_motion_waypoint(point)
                     rospy.loginfo('Add new position: %s', str(point.positions))
 

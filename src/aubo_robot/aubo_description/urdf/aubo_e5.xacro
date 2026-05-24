@@ -513,6 +513,11 @@
         <mesh filename="package://aubo_description/meshes/aubo_e5/collision/pedestal.STL" />
       </geometry>
     </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://aubo_description/meshes/aubo_e5/collision/pedestal.STL" />
+      </geometry>
+    </collision>
   </link>
 
   <joint name="pedestal_joint" type="fixed">

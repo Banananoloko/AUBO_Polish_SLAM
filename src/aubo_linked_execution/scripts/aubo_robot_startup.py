@@ -24,6 +24,7 @@ class AuboRobotStartup:
         self.switch_sent = False
         self.joint_states_received = False
         self.last_joint_state = None
+        self.last_robot_status = None
 
         # Publishers
         self.power_pub = rospy.Publisher('/robot_control', String, queue_size=1)
@@ -37,7 +38,25 @@ class AuboRobotStartup:
         self.position_alignment_tolerance = rospy.get_param('~position_alignment_tolerance', 0.05)
 
     def status_cb(self, msg):
+        self.last_robot_status = msg
         self.drives_powered = (msg.drives_powered.val == 1)
+
+    def log_last_robot_status(self, prefix='[startup] RobotStatus'):
+        if self.last_robot_status is None:
+            rospy.logwarn('%s: no /robot_status received yet', prefix)
+            return
+        msg = self.last_robot_status
+        rospy.logwarn(
+            '%s: mode=%s e_stopped=%s drives_powered=%s '
+            'motion_possible=%s in_motion=%s in_error=%s error_code=%s',
+            prefix,
+            msg.mode.val,
+            msg.e_stopped.val,
+            msg.drives_powered.val,
+            msg.motion_possible.val,
+            msg.in_motion.val,
+            msg.in_error.val,
+            msg.error_code)
 
     def joint_state_cb(self, msg):
         self.joint_states_received = True
@@ -60,6 +79,7 @@ class AuboRobotStartup:
 
         # 让驱动完成初始化
         rospy.sleep(1.0)
+        self.log_last_robot_status('[startup] Status before powerOn')
 
         # 2. 发送 powerOn
         if not self.drives_powered:
@@ -72,6 +92,7 @@ class AuboRobotStartup:
                 if (rospy.Time.now() - t0).to_sec() > self.timeout:
                     rospy.logerr('[startup] Timeout waiting for drives_powered. '
                                  'Check teach pendant: is e-stop released? Is robot enabled?')
+                    self.log_last_robot_status('[startup] Status at drives_powered timeout')
                     return
                 rate.sleep()
             rospy.loginfo('[startup] Robot powered on (drives_powered=1).')
