@@ -25,7 +25,8 @@ class SafetyMonitor:
 
         # 安全参数
         self.large_motion_threshold = rospy.get_param('~large_motion_threshold', 0.5)  # rad
-        self.trajectory_start_tolerance = rospy.get_param('~trajectory_start_tolerance', 0.15)  # rad
+        self.trajectory_start_tolerance = rospy.get_param('~trajectory_start_tolerance', 0.05)  # rad
+        self.safe_to_execute = True
         self.manual_movement_threshold = rospy.get_param('~manual_movement_threshold', 0.05)  # rad
 
         # Publishers
@@ -42,7 +43,7 @@ class SafetyMonitor:
         rospy.Subscriber('/joint_path_command', JointTrajectory, self.trajectory_command_cb, queue_size=1)
 
         # 初始状态：安全
-        self.safe_to_execute_pub.publish(Bool(data=True))
+        self._publish_safe_state(True)
 
         # 心跳定时器：每 2s 发布一次，防止 linked_execution_action_server 看门狗超时
         self._heartbeat_timer = rospy.Timer(rospy.Duration(2.0), self._heartbeat_cb)
@@ -60,7 +61,12 @@ class SafetyMonitor:
 
     def _heartbeat_cb(self, event):
         """定期心跳，防止 linked_execution_action_server 看门狗超时"""
-        self.safe_to_execute_pub.publish(Bool(data=True))
+        self._publish_safe_state()
+
+    def _publish_safe_state(self, safe=None):
+        if safe is not None:
+            self.safe_to_execute = bool(safe)
+        self.safe_to_execute_pub.publish(Bool(data=self.safe_to_execute))
 
     def joint_state_cb(self, msg):
         with self.lock:
@@ -133,10 +139,10 @@ class SafetyMonitor:
 
             rospy.logwarn('[safety_monitor] %s', warning_msg)
             self.warning_pub.publish(String(data=warning_msg))
-            self.safe_to_execute_pub.publish(Bool(data=False))
+            self._publish_safe_state(False)
         else:
             rospy.loginfo('[safety_monitor] ✓ Trajectory start point is close to current position (max_diff=%.3f rad)', max_diff)
-            self.safe_to_execute_pub.publish(Bool(data=True))
+            self._publish_safe_state(True)
 
     def check_trajectory_start_point(self, trajectory):
         """检查即将执行的轨迹起点"""
@@ -185,7 +191,7 @@ class SafetyMonitor:
 
                 rospy.logerr('[safety_monitor] %s', error_msg)
                 self.warning_pub.publish(String(data=error_msg))
-                self.safe_to_execute_pub.publish(Bool(data=False))
+                self._publish_safe_state(False)
                 return
 
         # 2. 检查轨迹起点
@@ -228,9 +234,10 @@ class SafetyMonitor:
 
             rospy.logerr('[safety_monitor] %s', error_msg)
             self.warning_pub.publish(String(data=error_msg))
-            self.safe_to_execute_pub.publish(Bool(data=False))
+            self._publish_safe_state(False)
         else:
             rospy.loginfo('[safety_monitor] ✓ Trajectory start point verified (max_diff=%.3f rad)', max_diff)
+            self._publish_safe_state(True)
 
 
 if __name__ == '__main__':

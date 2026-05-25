@@ -70,7 +70,7 @@ src/aubo_linked_execution/scripts/square_demo_gui.py
 - 左侧功能和输入面板宽度为 520px，用于避免长文本和输入区遮挡。
 - 右侧上半部分显示实时位姿和状态，下半部分显示系统日志。
 - 日志窗口整合 GUI stdout/cprint、启动日志文件和 `/rosout_agg`。
-- “急停”按钮为红色，位于 `OMPL — RRT Connect / LERP 规划算法 — 线性插值` 信息右侧。
+- “急停”按钮为红色大按钮，位于 `OMPL — RRT Connect / LERP 规划算法 — 线性插值` 信息行最右侧。
 
 按钮映射:
 
@@ -82,7 +82,7 @@ src/aubo_linked_execution/scripts/square_demo_gui.py
 | `[3] 多路径点连续轨迹` | 聚焦多路径点输入 | `_on_button_3()` |
 | `执行多路径点` | 执行多路径点笛卡尔轨迹 | `run_multi_waypoint()` -> `execute_multi_waypoints()` |
 | `[4] 安全审查状态` | 打印看门狗/门控状态 | `run_safety_watchdog_status()` |
-| `[5] 预设工件打磨测试` | 执行直线 + 抬升 + 圆弧循迹 | `run_grinding_test()` |
+| `[5] 预设工件打磨测试` | 执行直线 + 抬升 + 圆弧循迹 + 圆弧后抬升 | `run_grinding_test()` |
 | `[6] 轨迹生成测试` | 打印 OMPL/LERP/轨迹生成说明 | `run_planning_algorithms_overview()` |
 | `[7] 介绍 (README)` | 打印 README 摘要 | `run_show_readme()` |
 | `急停` | 截断规划/执行链，不退出 TUI | `issue_emergency_stop()` |
@@ -171,11 +171,12 @@ GUI worker thread
 - ROS 节点重复初始化保护: GUI 嵌入控制器时不再重复 `rospy.init_node()`。
 - 实机模式 action 限制: 禁止绕过 `linked_execution_controller`。
 - 轨迹起点锚定: 第一轨迹点锚定到实时关节，后续点做等价角展开，避免 `±2π` 分支跳变。
-- 关节跳变检查: 大跳变拒绝。
+- 关节跳变检查: 原始 MoveIt 轨迹和 2ms 重采样轨迹双层检查，大跳变拒绝。
 - 时间戳检查: 保证轨迹点时间递增、最小间隔满足 2ms 控制周期。
 - driver 安全重采样: 插入 2ms 安全路点，使相邻点不超过底层阈值。
 - 执行前清链: 每段发送前取消 action、发布空轨迹、driver cancel、MoveGroup stop、monitor reset。
-- 清链后停稳检查: 若关节速度仍显示在动，拒绝发送下一段。
+- 清链后停稳检查: 若关节速度仍显示在动，拒绝发送下一段；driver 未发布 velocity 时，TUI 由相邻 `/joint_states.position` 差分估算速度，避免假停稳。
+- 清链后重建计划: 清链停稳后重新从原始 plan 拷贝、锚定当前关节、检查原始跳变、2ms 重采样并复验，才发送 action。
 - 终点 FK 门控: 发送前用 `/compute_fk` 检查最后一个轨迹点确实对应当前阶段目标，防止旧目标或错误阶段轨迹被发出。
 - 到位校验: 使用真实反馈检查位置误差和姿态误差。
 - 已发送但未确认到位时不立即重试，避免旧轨迹未排空时拼接新轨迹。
@@ -183,7 +184,7 @@ GUI worker thread
 `linked_execution_action_server.py` 侧门控:
 
 - safety watchdog 超时检查。
-- trajectory start tolerance 检查。
+- trajectory start tolerance 检查，默认 0.05 rad，与 driver `max_waypoint_delta` 对齐。
 - joint jump threshold 检查。
 - 按实机速度/加速度能力动态重定时。
 - 实机执行成功后等待 Gazebo；Gazebo 超时作为 WARN，不覆盖实机成功。
@@ -200,6 +201,7 @@ GUI worker thread
 - `max_waypoint_delta = 0.05 rad`。
 - `velocity_safe_limits = [0.5, 0.5, 0.5, 0.6, 0.6, 0.6]`。
 - 使用 `ROBOT_WAYPOINT_DT = 0.002s` 匹配 500Hz 实机伺服周期。
+- 订阅 `/aubo_driver/cancel_trajectory`，收到 cancel 后清空 driver 内部 `buf_queue_`、`ros_motion_queue_`、速度状态和启动标志。
 - 发现 waypoint jump 或目标速度超限时清队列并取消 simulator stream，避免继续向 CAN 发送危险点。
 
 ## 8. 急停功能
@@ -220,6 +222,7 @@ src/aubo_linked_execution/scripts/emergency_stop.py
 - 发布 `/aubo_driver/cancel_trajectory`。
 - 发布 `/linked_execution/monitor_control = RESET`。
 - 发布 `/trajectory_execution_event = stop`。
+- 急停执行期间忽略重复点击；原运动 worker 未退出前不重新启用运动按钮，避免并发 worker 交叉发送 goal/cancel。
 - 日志记录急停 summary。
 
 该功能只截断规划/执行链，不长期修改 OMPL、LERP、到位判定或数据链。
@@ -236,6 +239,7 @@ GRIND-PRECHECK
   -> GRIND-ARC-APPROACH
   -> GRIND-ARC-START
   -> GRIND-ARC
+  -> GRIND-ARC-LIFT
 ```
 
 固定直线打磨姿态:
@@ -297,6 +301,12 @@ orientation tolerance = 8 deg
 
 圆弧段通过 6D 点拟合/补密，保持 Z 约束，RPY 随点插值，整体 `time_scale = 8.0`。
 
+圆弧循迹完成后，末端保持圆弧终点 RPY，垂直抬升 0.10m:
+
+```text
+(-0.6600, 0.0500, 0.2765) + 圆弧终点 RPY
+```
+
 ## 10. 我完成的主要修改记录
 
 按最终系统有效状态整理:
@@ -306,7 +316,7 @@ orientation tolerance = 8 deg
 3. 扩宽 TUI 左侧面板和输入区域，降低长文本遮挡。
 4. 审查并对齐 GUI 按钮序号和后端接口。
 5. 修复多路径点和预设打磨轨迹中错误传入 bool 约束导致的 `Unable to set path constraints`。
-6. 增加 [5] 预设工件打磨测试，并持续更新为当前“直线 + 抬升 + 圆弧循迹”版本。
+6. 增加 [5] 预设工件打磨测试，并持续更新为当前“直线 + 抬升 + 圆弧循迹 + 圆弧后抬升”版本。
 7. 为 [5] 增加固定末端姿态、姿态到位检查和圆弧 6D 姿态插值。
 8. 将直线打磨段 Z 调整为 0.18m，并保持水平移动。
 9. 添加圆弧完整 13 个 6D 原始点，并使用圆弧拟合/补密保证第二段大致为圆弧。
@@ -322,6 +332,12 @@ orientation tolerance = 8 deg
 19. 修改 driver，增加 2ms 实机周期下的 waypoint jump 和目标速度硬拒绝。
 20. 对 [5] 的严重旧流/旧 goal 风险增加执行前清链、停稳检查和终点 FK 门控。
 21. 保留启动日志、ROS 实时日志和 GUI 日志统一显示，方便复盘。
+22. 将 direct action 执行改为清链停稳后重新锚定、2ms 重采样和复验，再发送到实机 action，避免旧流清空后起点漂移造成瞬时超速。
+23. 缩短段间固定等待，仅保留短反馈刷新；停稳仍由速度轮询和执行前清链门控负责。
+24. 补齐 driver 侧 `/aubo_driver/cancel_trajectory` 订阅入口，使 TUI/急停发出的 cancel 能真实清 driver 队列和速度状态。
+25. 将 safety monitor 与 linked execution 的轨迹起点容差对齐为 0.05 rad，并修复 safety heartbeat 不再把 unsafe 固定覆盖成 true。
+26. TUI 停稳判定增加 `/joint_states.position` 差分速度估算，避免 driver 不填 velocity 时误判已停。
+27. 急停按钮增加防重入和 worker 存活检查，原运动线程未退出前不重新开放运动按钮。
 
 ## 11. 当前实机测试建议
 
@@ -347,4 +363,3 @@ GRIND-APPROACH: 执行前清空旧 action/驱动流队列
 ```
 
 系统会拒绝发送轨迹，应先排查旧 action、driver 状态、MoveIt 当前状态和示教器报警。
-

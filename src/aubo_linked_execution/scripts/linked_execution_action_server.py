@@ -59,7 +59,7 @@ class LinkedExecutionActionServer(object):
         self._safe_to_execute = True
         self._last_safety_msg_time = rospy.Time.now()
         self._safety_watchdog_timeout = rospy.get_param('~safety_watchdog_timeout', 5.0)
-        self._trajectory_start_tolerance = rospy.get_param('~trajectory_start_tolerance', 0.15)
+        self._trajectory_start_tolerance = rospy.get_param('~trajectory_start_tolerance', 0.05)
         self._joint_jump_threshold = rospy.get_param('~joint_jump_threshold', 0.35)
         self._max_retime_scale = rospy.get_param('~max_retime_scale', 6.0)
         self._simulator_sample_dt = rospy.get_param('~simulator_sample_dt', 0.005)

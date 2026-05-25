@@ -217,6 +217,7 @@ def parse_pose_input(parts):
             → 圆弧起点上方 gap
             → 下探到圆弧起点
             → 13 点 6D 圆弧循迹 Z=0.1765
+            → 圆弧终点姿态垂直抬升 0.10m
   选项 [6]: 轨迹生成测试 / OMPL 与 LERP 说明
   选项 [7]: 介绍 (README)
       │
@@ -340,6 +341,7 @@ MoveIt 发出 FollowJointTrajectoryGoal
   │
   ├─ 1. 轨迹审查
   │      检查 joint_names、NaN、轨迹起点 vs /real/joint_states
+  │      轨迹起点容差 0.05 rad，与 driver max_waypoint_delta 对齐
   │      检查相邻轨迹点关节跳变
   │
   ├─ 2. 动态重定时
@@ -443,6 +445,11 @@ moveItPosCallback(msg: JointTrajectoryPoint)  ← /moveItController_cmd
        joint_acc_ = msg.accelerations
        buf_queue_.size() > buffer_size_(400) → start_move_ = true
 
+cancelTrajectoryCallback(msg: UInt8) ← /aubo_driver/cancel_trajectory
+  │
+  └─ msg.data != 0 → clearQueuedMotion()
+       清 buf_queue_、ros_motion_queue_、start_move_、速度状态和 need_sync_filter_
+
 updateControlStatus()  ← 由 main loop 每 2ms (500Hz) 调用
   │
   ├─ data_count_++ → 每 MAXALLOWEDDELAY(50) 次 (0.1s) 检查一次
@@ -480,11 +487,17 @@ publishWaypointToRobot() 线程 (持续运行)
          ├─ 速度检查: DT = 0.002s (匹配机器人 500Hz 伺服)
          │    target_joint_velc_[i] = fabs(joint[i] - joint_filter_[i]) / 0.002
          │
-         ├─ 超过 MaxVelc[i]?
-         │    MaxVelc = {2.596, 2.596, 2.596, 3.110, 3.110, 3.110} rad/s (100% HW)
-         │    → max_ratio = max(target_vel / MaxVelc)
-         │    → n_equalpart = ceil(max_ratio) + 1 个中间插补点
-         │    → ROS_WARN "Joint X velocity Y rad/s exceeds limit Z rad/s"
+         ├─ 相邻路点跳变 > /aubo_driver/max_waypoint_delta(0.05 rad)?
+         │    → clearQueuedMotion("waypoint jump guard")
+         │    → 拒绝该批次，避免旧流/稀疏点造成瞬时高速
+         │
+         ├─ 超过 min(MaxVelc[i], /aubo_driver/velocity_safe_limits[i])?
+         │    默认 safe limits = {0.5, 0.5, 0.5, 0.6, 0.6, 0.6} rad/s
+         │    reject_overspeed_waypoints=true 时:
+         │      → clearQueuedMotion("target velocity guard")
+         │      → 拒绝该批次，不再向 CAN 发送危险点
+         │    reject_overspeed_waypoints=false 时:
+         │      → n_equalpart = ceil(max_ratio) + 1 个中间插补点
          │
          ├─ 加速度检查: joint_acc_[i] = fabs(Δvelocity) / 0.002
          │    MaxAcc = {17.309, 17.309, 17.309, 20.737, 20.737, 20.737} rad/s²
@@ -666,6 +679,7 @@ GUI/TUI 路径:
 /aubo_driver/rib_status                 pub    Int32MultiArray                   50Hz (CAN 缓冲区状态)
 /aubo_driver/robot_connected            param  string                            "1"/"0"
 /aubo_controller/velocity_scale_factor  param  float                             0.58
+/aubo_driver/cancel_trajectory          pub/sub UInt8                            TUI/driver 双向清队列
 
 linked_execution_controller/follow_joint_trajectory   Action Server  (MoveIt → 聚合层)
 aubo_e5_controller/follow_joint_trajectory            Action Server  (聚合层 → 实机)
@@ -699,6 +713,7 @@ aubo_e5_controller/follow_joint_trajectory            Action Server  (聚合层 
 | `/robot_name` | global param | aubo_e5 | 机器人型号 |
 | `constraints/goal_threshold` | C++ action param | 0.04 rad | 到达判定公差 |
 | `safety_watchdog_timeout` | linked_execution param | 5.0 s | 安全监控看门狗超时 |
+| `trajectory_start_tolerance` | safety/linked param | 0.05 rad | 起点容差，与 driver 硬跳变阈值对齐 |
 | `real_server_wait_timeout` | linked_execution param | 30.0 s | 等待实机 action server 超时 |
 
 ### 7.2 驱动硬编码常量

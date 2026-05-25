@@ -39,6 +39,7 @@
 #include <queue>
 #include <mutex>
 #include <atomic>
+#include <array>
 
 #include <ros/ros.h>
 #include <std_msgs/Float32MultiArray.h>
@@ -67,6 +68,7 @@
 #include "aubo_driver/readerwriterqueue.h"
 #include "sensor_msgs/JointState.h"
 #include <control_msgs/FollowJointTrajectoryFeedback.h>
+#include <trajectory_msgs/JointTrajectoryPoint.h>
 
 #include "otg/otgnewslib.h"
 
@@ -179,6 +181,7 @@ namespace aubo_driver
             ros::Subscriber moveit_controller_subs_;
             ros::Subscriber trajectory_execution_subs_;
             ros::Subscriber robot_control_subs_;
+            ros::Subscriber cancel_trajectory_subs_;
             ros::Publisher io_pub_;
 
         private:
@@ -187,12 +190,14 @@ namespace aubo_driver
             void robotControlCallback(const std_msgs::String::ConstPtr &msg);
             void AuboAPICallback(const std_msgs::Float32MultiArray::ConstPtr &msg);
             void teachCallback(const std_msgs::Float32MultiArray::ConstPtr &msg);
+            void cancelTrajectoryCallback(const std_msgs::UInt8::ConstPtr &msg);
             void timerCallback(const ros::TimerEvent& e);
             bool setRobotJointsByMoveIt();
             void controllerSwitchCallback(const std_msgs::Int32::ConstPtr &msg);
             void publishIOMsg();
             std::vector<aubo_robot_namespace::wayPoint_S> tryPopWaypoint(int count);
             void publishWaypointToRobot();
+            void clearQueuedMotion(const char *reason);
             int checkTargetVelc(JointParam mTaget_JointAngle, JointParam mLast_JointAngle, 
                                 JointVelcAccParam &mJointVelc);
             int checkTargetAcc(JointVelcAccParam mLastJointVelc, JointVelcAccParam &mTargetJointVelc);

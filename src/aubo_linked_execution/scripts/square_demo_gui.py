@@ -719,6 +719,7 @@ class SquareDemoGUI:
         self.state = SharedState()
         self.controller = None  # GUIDemoController or MockController
         self._worker_thread: Optional[threading.Thread] = None
+        self._estop_in_progress = False
         self._shutting_down = False
         self._was_executing = False  # 用于主线程轮询检测执行完成
         self._system_log_tailer = None
@@ -971,17 +972,21 @@ class SquareDemoGUI:
         # 规划算法信息行
         planner_frame = ttk.Frame(pose_frame)
         planner_frame.grid(row=3, column=0, columnspan=3, padx=20, pady=(10, 0),
-                           sticky=tk.W)
+                           sticky=tk.EW)
+        planner_frame.grid_columnconfigure(0, weight=1)
+        planner_frame.grid_columnconfigure(1, weight=0)
         tk.Label(planner_frame, text='OMPL — RRT Connect    LERP 规划算法 — 线性插值',
-                 font=('Arial', 9), fg='#555555', bg='#f0f0f0').pack(side=tk.LEFT)
+                 font=('Arial', 9), fg='#555555', bg='#f0f0f0').grid(
+                     row=0, column=0, sticky=tk.W)
         self._estop_btn = tk.Button(planner_frame, text='急停',
-                                    font=('Arial', 10, 'bold'),
+                                    font=('Arial', 16, 'bold'),
                                     bg='#c00000', fg='white',
                                     activebackground='#8b0000',
                                     activeforeground='white',
-                                    relief=tk.FLAT, padx=14, pady=4,
+                                    relief=tk.FLAT, padx=34, pady=12,
+                                    width=8,
                                     command=self._on_emergency_stop)
-        self._estop_btn.pack(side=tk.LEFT, padx=(18, 0))
+        self._estop_btn.grid(row=0, column=1, sticky=tk.E, padx=(120, 0))
 
         # 话题频率行
         hz_frame = ttk.Frame(pose_frame)
@@ -1305,6 +1310,11 @@ class SquareDemoGUI:
             return
         if self.state.ros_error.is_set():
             return
+        if self._estop_in_progress:
+            return
+        if self._worker_thread is not None and self._worker_thread.is_alive():
+            self._disable_all_buttons()
+            return
         for btn in self._btns.values():
             btn.configure(state=tk.NORMAL)
         self._custom_btn.configure(state=tk.NORMAL)
@@ -1315,6 +1325,10 @@ class SquareDemoGUI:
     def _on_emergency_stop(self):
         if self._shutting_down:
             return
+        if self._estop_in_progress:
+            cprint('WARN', '急停正在执行中, 忽略重复点击')
+            return
+        self._estop_in_progress = True
         cprint('WARN', '急停按钮触发: 正在截断规划/执行链, TUI 保持运行')
         with self.state.status_lock:
             self.state.status_text = '[!] 急停已触发 — 正在停止运动链'
@@ -1340,19 +1354,28 @@ class SquareDemoGUI:
             except Exception as exc:
                 cprint('ERROR', '急停执行异常: %s' % exc)
             finally:
-                self.state.executing.clear()
+                motion_worker_alive = (
+                    self._worker_thread is not None and
+                    self._worker_thread.is_alive())
+                if not motion_worker_alive:
+                    self.state.executing.clear()
+                self._estop_in_progress = False
                 with self.state.status_lock:
                     self.state.status_text = (
                         '[!] 急停完成 — 系统保持在线, 请确认实机已停止'
                         if ok else '[!] 急停执行异常 — 请检查实机状态')
                 self.root.after(0, self._update_status_display)
-                self.root.after(0, self._enable_all_buttons)
+                if motion_worker_alive:
+                    self.root.after(0, self._disable_all_buttons)
+                else:
+                    self.root.after(0, self._enable_all_buttons)
 
         threading.Thread(target=_stop_worker, daemon=True,
                          name='emergency-stop').start()
 
     def _run_in_worker(self, func, name):
-        if self.state.executing.is_set():
+        if (self.state.executing.is_set() or
+                (self._worker_thread is not None and self._worker_thread.is_alive())):
             cprint('WARN', '已有任务执行中, 请等待完成')
             return
         if self.controller is None:
