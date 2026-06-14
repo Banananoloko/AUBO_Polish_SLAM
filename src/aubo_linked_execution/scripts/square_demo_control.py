@@ -87,6 +87,7 @@ PRE_EXECUTION_CLEAR_PUBLISH_DT = 0.015
 STOP_SETTLE_POLL_DT = 0.05
 ARRIVAL_POLL_DT = 0.10
 POST_SEGMENT_SETTLE = 0.10
+GRINDING_TRANSITION_SETTLE = 0.03
 FINAL_FK_TARGET_TOL = 0.060             # hard gate: planned final FK must match this stage target
 MIN_TRAJECTORY_DT = 0.002               # seconds, real controller consumes waypoints at 2ms
 DRIVER_STREAM_DT = 0.002                # aubo_driver differentiates every MAC 2ms waypoint
@@ -1023,6 +1024,8 @@ class SquareDemoController:
 
         goal = FollowJointTrajectoryGoal()
         goal.trajectory = prepared.joint_trajectory
+        if tag in ('GRIND-CART', 'GRIND-ARC'):
+            self._notify_preview_review_passed()
         cprint('EXEC', '%s: direct action execute %.1fs轨迹, timeout %.1fs ...' %
                (tag, traj_duration, wait_timeout))
 
@@ -1885,6 +1888,15 @@ class SquareDemoController:
 
         cprint('INFO', '')
 
+    def _notify_preview_review_passed(self):
+        callback = getattr(self, 'preview_review_passed_callback', None)
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception as exc:
+            cprint('WARN', 'TUI 预演审查弹窗通知失败: %s' % exc)
+
     # ============================================================
     # [5] 预设工件打磨测试
     # ============================================================
@@ -1967,7 +1979,7 @@ class SquareDemoController:
             cprint('WARN', '打磨 gap 抬升未到达，取消圆弧循迹 | 误差=%.3fm | 延迟=%.3fs' %
                    (err, sync_delay))
             return False
-        rospy.sleep(POST_SEGMENT_SETTLE)
+        rospy.sleep(GRINDING_TRANSITION_SETTLE)
 
         arc_start = GRINDING_ARC_POSES[0]
         arc_start_position = arc_start[:3]
@@ -1988,7 +2000,7 @@ class SquareDemoController:
             cprint('WARN', '圆弧起点上方 gap 位未到达，取消圆弧循迹 | 误差=%.3fm | 延迟=%.3fs' %
                    (err, sync_delay))
             return False
-        rospy.sleep(POST_SEGMENT_SETTLE)
+        rospy.sleep(GRINDING_TRANSITION_SETTLE)
 
         cprint('INFO', '下探到圆弧起点: (%.4f, %.4f, %.4f)' %
                arc_start_position)
@@ -2030,7 +2042,7 @@ class SquareDemoController:
                        (err, sync_delay))
                 return False
 
-            cprint('OK', '预设工件打磨测试结束 | 直线 + gap + 圆弧循迹 + 末端抬升完成')
+            cprint('OK', '预设工件打磨测试结束')
             return True
 
         cprint('WARN', '圆弧循迹未完成 | 误差=%.3fm | 延迟=%.3fs' %

@@ -10,15 +10,16 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  输入路径 A: GUI/TUI (square_demo_gui.py → square_demo_control.py)   │
-│    用户输入示教器系坐标 → to_world() → MoveIt 目标规划           │
+│  输入路径 A: GUI/TUI (square_demo_gui.py →                                              |
+|                      square_demo_control.py)                    │
+│    用户输入示教器系坐标 → to_world() → MoveIt 目标规划          │
 │    xyz 走 position target；xyz+RPY 走 pose target               │
 └──────────────────────────┬──────────────────────────────────────┘
                            │
 ┌─────────────────────────────────────────────────────────────────┐
-│  输入路径 B: RViz 交互标记                                        │
-│    直接 world 系拖拽 → Plan & Execute                            │
-│    无 Z 偏移问题（RViz 天然工作在 world 系）                      │
+│  输入路径 B: RViz 交互标记                                      │
+│    直接 world 系拖拽 → Plan & Execute                           │
+│    无 Z 偏移问题（RViz 天然工作在 world 系）                                            │
 │    箭头=平移(3-DOF), 圆环=旋转(3-DOF), 同时拖=6-DOF             │
 └──────────────────────────┬──────────────────────────────────────┘
                            │

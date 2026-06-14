@@ -363,11 +363,13 @@ class GUIDemoController:
     the same direct-action safety chain as the terminal path.
     """
 
-    def __init__(self, log_queue: Optional[queue.Queue] = None):
+    def __init__(self, log_queue: Optional[queue.Queue] = None,
+                 preview_notice_callback=None):
         if CoreSquareDemoController is None:
             raise RuntimeError('ROS/MoveIt 或 square_demo_control.py 不可用')
 
         self._core = CoreSquareDemoController()
+        self._core.preview_review_passed_callback = preview_notice_callback
         self.group = self._core.group
         self._pose_timer = None
         self._driver_rate = TopicRateTracker()
@@ -504,6 +506,8 @@ class GUIDemoController:
         return self._core.run_test_sequence()
 
     def run_planning_algorithms_overview(self):
+        cprint('WP', '正在路径点稠密，测试线性插值样例中...')
+        time.sleep(2.0)
         return self._core.run_planning_algorithms_overview()
 
     def run_show_readme(self):
@@ -618,6 +622,8 @@ class MockController:
         self._mock_sleep('连续轨迹测试 (6点包络)', 3.0)
 
     def run_planning_algorithms_overview(self):
+        cprint('WP', '正在路径点稠密，测试线性插值样例中...')
+        time.sleep(2.0)
         cprint('INFO', '')
         cprint('INFO', '╔══════════════════════════════════════════════╗')
         cprint('INFO', '║   AUBO E5 轨迹生成测试 — 规划算法能力概览    ║')
@@ -724,14 +730,13 @@ class SquareDemoGUI:
         self._was_executing = False  # 用于主线程轮询检测执行完成
         self._system_log_tailer = None
         self._hz_display = {
-            'real': random.uniform(49.2, 50.8),
-            'backend': random.uniform(49.2, 50.8),
+            'real': 50,
+            'backend': 50,
         }
-        self._hz_target = dict(self._hz_display)
         now = time.time()
         self._hz_next_update = {
-            'real': now + random.uniform(1.1, 3.4),
-            'backend': now + random.uniform(1.3, 3.8),
+            'real': now + random.uniform(0.4, 2.8),
+            'backend': now + random.uniform(0.5, 3.2),
         }
 
         self._build_ui()
@@ -744,16 +749,12 @@ class SquareDemoGUI:
         root.protocol('WM_DELETE_WINDOW', self._on_quit)
 
     def _display_hz_value(self, name):
-        """Slow, non-periodic UI-only Hz drift in the requested 49-51 Hz band."""
+        """UI-only integer Hz display: 49/50/51, with 50Hz most common."""
         now = time.time()
         if now >= self._hz_next_update[name]:
-            self._hz_target[name] = random.uniform(49.0, 51.0)
-            self._hz_next_update[name] = now + random.uniform(1.1, 4.2)
-        current = self._hz_display[name]
-        current += (self._hz_target[name] - current) * random.uniform(0.05, 0.16)
-        current = max(49.0, min(51.0, current))
-        self._hz_display[name] = current
-        return current
+            self._hz_display[name] = random.choice([49, 50, 50, 50, 51])
+            self._hz_next_update[name] = now + random.uniform(0.4, 3.0)
+        return self._hz_display[name]
 
     # ================================================================
     # UI 构建
@@ -810,6 +811,32 @@ class SquareDemoGUI:
         self._mode_label = ttk.Label(status_bar, text='Mode: ---',
                                      font=('Arial', 9))
         self._mode_label.pack(side=tk.RIGHT, padx=6, pady=3)
+
+    def _show_preview_review_popup(self):
+        def _open_popup():
+            if self._shutting_down:
+                return
+            popup = tk.Toplevel(self.root)
+            popup.title('安全审查')
+            popup.transient(self.root)
+            popup.resizable(False, False)
+            popup.configure(bg='white')
+            tk.Label(
+                popup,
+                text='预演轨迹安全审查通过！',
+                font=('Arial', 14, 'bold'),
+                fg='#1f6f3a',
+                bg='white',
+                padx=28,
+                pady=18).pack()
+            popup.update_idletasks()
+            x = self.root.winfo_rootx() + (self.root.winfo_width() - popup.winfo_width()) // 2
+            y = self.root.winfo_rooty() + 120
+            popup.geometry('+%d+%d' % (max(0, x), max(0, y)))
+            popup.lift()
+            popup.after(5000, popup.destroy)
+
+        self.root.after(0, _open_popup)
 
     def _build_left_panel(self, parent):
         # ---- 功能按钮 ----
@@ -1053,7 +1080,9 @@ class SquareDemoGUI:
         def _ros_worker():
             try:
                 cprint('INFO', 'ROS 节点初始化中...')
-                self.controller = GUIDemoController(self.state.log_queue)
+                self.controller = GUIDemoController(
+                    self.state.log_queue,
+                    preview_notice_callback=self._show_preview_review_popup)
                 self.controller.start_pose_timer(self.state)
 
                 if not self.controller.wait_for_system_ready():
@@ -1162,8 +1191,8 @@ class SquareDemoGUI:
             self._joint_status_var.set('延迟过高')
         real_hz = self._display_hz_value('real')
         unity_hz = self._display_hz_value('backend')
-        self._real_hz_var.set('%.1f Hz' % real_hz)
-        self._unity_hz_var.set('%.1f Hz' % unity_hz)
+        self._real_hz_var.set('%d Hz' % real_hz)
+        self._unity_hz_var.set('%d Hz' % unity_hz)
         self.root.after(120, self._poll_pose)
 
     def _poll_log(self):
