@@ -119,6 +119,7 @@ AuboDriver::AuboDriver(int num = 0):delay_clear_times(0),buffer_size_(400),io_fl
     teach_subs_ = nh_.subscribe("teach_cmd", 10, &AuboDriver::teachCallback,this);
     moveAPI_subs_ = nh_.subscribe("moveAPI_cmd", 10, &AuboDriver::AuboAPICallback, this);
     controller_switch_sub_ = nh_.subscribe("/aubo_driver/controller_switch", 10, &AuboDriver::controllerSwitchCallback, this);
+    cancel_trajectory_subs_ = nh_.subscribe("aubo_driver/cancel_trajectory", 10, &AuboDriver::cancelTrajectoryCallback, this);
 
     std::string file_name = "/home/aubo-fy/aubo_ws/jointpose.csv";
     remove(file_name.c_str());
@@ -461,6 +462,39 @@ void AuboDriver::controllerSwitchCallback(const std_msgs::Int32::ConstPtr &msg)
     else
     {
         ROS_INFO("Undefined controller type, failed to switch the controller!");
+    }
+}
+
+void AuboDriver::clearQueuedMotion(const char *reason)
+{
+    {
+        std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+        start_move_ = false;
+        while(!buf_queue_.empty())
+            buf_queue_.pop();
+    }
+
+    std::array<double, 6> dropped_joint;
+    while(ros_motion_queue_.try_dequeue(dropped_joint)) {}
+
+    for(int j = 0; j < ARM_DOF; j++) {
+        last_joint_velc_.jointPara[j] = 0.0;
+        target_joint_velc_.jointPara[j] = 0.0;
+    }
+    over_speed_flag_ = false;
+    data_count_ = 0;
+    delay_clear_times = 0;
+    need_sync_filter_.store(true, std::memory_order_release);
+
+    memcpy(last_recieve_point_, current_joints_, sizeof(double) * axis_number_);
+    memcpy(target_point_, current_joints_, sizeof(double) * axis_number_);
+    ROS_WARN("Cleared driver motion queues: %s", reason ? reason : "cancel");
+}
+
+void AuboDriver::cancelTrajectoryCallback(const std_msgs::UInt8::ConstPtr &msg)
+{
+    if(msg && msg->data != 0) {
+        clearQueuedMotion("aubo_driver/cancel_trajectory");
     }
 }
 
@@ -963,18 +997,7 @@ std::vector<aubo_robot_namespace::wayPoint_S> AuboDriver::tryPopWaypoint(int cou
                         std_msgs::UInt8 cancel;
                         cancel.data = 1;
                         cancle_trajectory_pub_.publish(cancel);
-                        {
-                            std::lock_guard<std::mutex> queue_lock(queue_mutex_);
-                            start_move_ = false;
-                            while(!buf_queue_.empty())
-                                buf_queue_.pop();
-                        }
-                        std::array<double, 6> dropped_joint;
-                        while(ros_motion_queue_.try_dequeue(dropped_joint)) {}
-                        for(int j = 0; j < ARM_DOF; j++) {
-                            last_joint_velc_.jointPara[j] = 0.0;
-                            target_joint_velc_.jointPara[j] = 0.0;
-                        }
+                        clearQueuedMotion("waypoint jump guard");
                         wayPointVector.clear();
                         return wayPointVector;
                     }
@@ -1015,18 +1038,7 @@ std::vector<aubo_robot_namespace::wayPoint_S> AuboDriver::tryPopWaypoint(int cou
                             std_msgs::UInt8 cancel;
                             cancel.data = 1;
                             cancle_trajectory_pub_.publish(cancel);
-                            {
-                                std::lock_guard<std::mutex> queue_lock(queue_mutex_);
-                                start_move_ = false;
-                                while(!buf_queue_.empty())
-                                    buf_queue_.pop();
-                            }
-                            std::array<double, 6> dropped_joint;
-                            while(ros_motion_queue_.try_dequeue(dropped_joint)) {}
-                            for(int j = 0; j < ARM_DOF; j++) {
-                                last_joint_velc_.jointPara[j] = 0.0;
-                                target_joint_velc_.jointPara[j] = 0.0;
-                            }
+                            clearQueuedMotion("target velocity guard");
                             wayPointVector.clear();
                             return wayPointVector;
                         }
@@ -1143,18 +1155,7 @@ void AuboDriver::publishWaypointToRobot()
                 sync_retry_count++;
                 if(sync_retry_count >= MAX_SYNC_RETRIES) {
                     ROS_ERROR("Failed to synchronize joint_filter_ after %d retries; dropping pending trajectory to avoid stale-reference overspeed", MAX_SYNC_RETRIES);
-                    {
-                        std::lock_guard<std::mutex> lock(queue_mutex_);
-                        start_move_ = false;
-                        while(!buf_queue_.empty())
-                            buf_queue_.pop();
-                    }
-                    std::array<double, 6> dropped_joint;
-                    while(ros_motion_queue_.try_dequeue(dropped_joint)) {}
-                    for(int i = 0; i < ARM_DOF; i++) {
-                        last_joint_velc_.jointPara[i] = 0.0;
-                        target_joint_velc_.jointPara[i] = 0.0;
-                    }
+                    clearQueuedMotion("joint_filter sync failure");
                     need_sync_filter_.store(false, std::memory_order_release);
                     sync_retry_count = 0;
                     std::this_thread::sleep_for(std::chrono::milliseconds(20));

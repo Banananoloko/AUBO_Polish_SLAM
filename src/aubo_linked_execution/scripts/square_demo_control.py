@@ -82,7 +82,12 @@ CARTESIAN_INTERPOLATION_STEP = 0.020    # 2cm user-waypoint densification for li
 CARTESIAN_MIN_FRACTION = 0.98           # reject partial Cartesian paths before any robot motion
 CARTESIAN_JUMP_THRESHOLD = 2.0          # MoveIt relative jump guard; exact guard below is stricter
 CARTESIAN_WRIST3_RANGE_LIMIT = 0.12     # rad, keep tool roll/wrist3 effectively locked
-PRE_EXECUTION_CLEAR_SETTLE = 0.45       # seconds, let cancel/empty-trajectory clear old queues
+PRE_EXECUTION_CLEAR_SETTLE = 0.20       # seconds, let cancel/empty-trajectory clear old queues
+PRE_EXECUTION_CLEAR_PUBLISH_DT = 0.015
+STOP_SETTLE_POLL_DT = 0.05
+ARRIVAL_POLL_DT = 0.10
+POST_SEGMENT_SETTLE = 0.10
+GRINDING_TRANSITION_SETTLE = 0.03
 FINAL_FK_TARGET_TOL = 0.060             # hard gate: planned final FK must match this stage target
 MIN_TRAJECTORY_DT = 0.002               # seconds, real controller consumes waypoints at 2ms
 DRIVER_STREAM_DT = 0.002                # aubo_driver differentiates every MAC 2ms waypoint
@@ -118,6 +123,7 @@ GRINDING_APPROACH_Z_OFFSET = 0.08
 GRINDING_TOOL_RPY_DEG = (178.0, 4.5, -86.0)
 GRINDING_ORI_TOL = math.radians(8.0)
 GRINDING_LIFT_GAP = 0.10
+GRINDING_ARC_EXIT_LIFT = 0.10
 GRINDING_ARC_TIME_SCALE = 8.0
 GRINDING_ARC_POSES = [
     (-0.5140, 0.0800, 0.1765, 178.00, 0.82, -100.80),
@@ -224,6 +230,8 @@ class SquareDemoController:
         self._joint_positions = {}
         self._joint_velocities = {}
         self._joint_state_time = None
+        self._last_joint_positions = {}
+        self._last_joint_sample_wall_time = None
         self._gazebo_joint_time = None
         self._execution_client = None
         self._execution_action_ns = ''
@@ -265,9 +273,22 @@ class SquareDemoController:
     # ============================================================
     def _joint_state_cb(self, msg):
         with self._lock:
-            self._joint_positions = dict(zip(msg.name, msg.position))
+            now = time.time()
+            positions = dict(zip(msg.name, msg.position))
+            if self._last_joint_positions and self._last_joint_sample_wall_time:
+                dt = max(1e-6, now - self._last_joint_sample_wall_time)
+                diff_vel = {}
+                for name, pos in positions.items():
+                    if name in self._last_joint_positions:
+                        diff_vel[name] = (pos - self._last_joint_positions[name]) / dt
+                if diff_vel:
+                    self._joint_velocities = diff_vel
+
+            self._joint_positions = positions
             if msg.velocity and len(msg.velocity) == len(msg.name):
                 self._joint_velocities = dict(zip(msg.name, msg.velocity))
+            self._last_joint_positions = positions
+            self._last_joint_sample_wall_time = now
             self._joint_state_time = msg.header.stamp
 
     def _gazebo_joint_cb(self, msg):
@@ -681,7 +702,7 @@ class SquareDemoController:
             cprint('WARN', '轨迹时间参数化失败: %s' % e)
             return None
 
-    def _start_gap_reason(self, plan, limit=0.15):
+    def _start_gap_reason(self, plan, limit=0.05):
         traj = getattr(plan, 'joint_trajectory', None)
         if not traj or not traj.points:
             return '空轨迹'
@@ -812,7 +833,7 @@ class SquareDemoController:
             self._joint_path_clear_pub.publish(empty)
             self._driver_cancel_pub.publish(UInt8(data=1))
             self._trajectory_event_pub.publish(String(data='stop'))
-            rospy.sleep(0.03)
+            rospy.sleep(PRE_EXECUTION_CLEAR_PUBLISH_DT)
         self._monitor_control_pub.publish(String(data='RESET'))
         cprint('INFO', '%s: 执行前清空旧 action/驱动流队列' % tag)
         rospy.sleep(PRE_EXECUTION_CLEAR_SETTLE)
@@ -840,7 +861,7 @@ class SquareDemoController:
                     return True
             else:
                 stable = 0
-            rospy.sleep(0.1)
+            rospy.sleep(STOP_SETTLE_POLL_DT)
         cprint('WARN', '%s: 清队列后关节仍可能在动 | max_vel=%.3f rad/s' %
                (tag, max_vel))
         return False
@@ -907,7 +928,7 @@ class SquareDemoController:
             cprint('INFO', '%s: 轨迹终点 FK 门控通过 | err=%.3fm' % (tag, err))
         return ''
 
-    def _wait_for_arrival(self, wx, wy, wz, timeout, consecutive=3,
+    def _wait_for_arrival(self, wx, wy, wz, timeout, consecutive=ARRIVAL_CONSEC,
                           orientation=None,
                           orientation_tolerance=GOAL_ORI_TOL):
         deadline = time.time() + timeout
@@ -923,8 +944,31 @@ class SquareDemoController:
                     return True, last_err, last_ori_err
             else:
                 ok_count = 0
-            rospy.sleep(0.2)
+            rospy.sleep(ARRIVAL_POLL_DT)
         return False, last_err, last_ori_err
+
+    def _validate_direct_plan(self, prepared, tag, expected_plan_xyz=None):
+        jump_reason = self._large_joint_jump_reason(prepared)
+        if jump_reason:
+            cprint('WARN', '%s: 轨迹被拒绝: %s' % (tag, jump_reason))
+            return False
+
+        timing_reason = self._trajectory_timing_reason(prepared)
+        if timing_reason:
+            cprint('WARN', '%s: 轨迹时间戳不安全: %s' % (tag, timing_reason))
+            return False
+
+        start_reason = self._start_gap_reason(prepared)
+        if start_reason:
+            cprint('WARN', '%s: 轨迹起点不安全: %s' % (tag, start_reason))
+            return False
+
+        final_reason = self._final_fk_target_reason(prepared, expected_plan_xyz, tag)
+        if final_reason:
+            cprint('ERROR', '%s: 轨迹被拒绝: %s' % (tag, final_reason))
+            return False
+
+        return True
 
     def _execute_plan_direct(self, plan, wx, wy, wz, tag,
                              expected_orientation=None,
@@ -934,30 +978,34 @@ class SquareDemoController:
         """Execute through FollowJointTrajectory directly, avoiding MoveIt TEM preemption."""
         prepared = self._prepare_plan_for_direct_execution(plan, time_scale=time_scale)
         self._anchor_trajectory_to_current_state(prepared)
+
+        raw_jump_reason = self._large_joint_jump_reason(prepared)
+        if raw_jump_reason:
+            cprint('WARN', '%s: 原始轨迹被拒绝: %s' % (tag, raw_jump_reason))
+            return False, False, float('inf'), -1.0
+
         self._densify_trajectory_for_driver(prepared)
 
-        jump_reason = self._large_joint_jump_reason(prepared)
-        if jump_reason:
-            cprint('WARN', '%s: 轨迹被拒绝: %s' % (tag, jump_reason))
-            return False, False, float('inf'), -1.0
-
-        timing_reason = self._trajectory_timing_reason(prepared)
-        if timing_reason:
-            cprint('WARN', '%s: 轨迹时间戳不安全: %s' % (tag, timing_reason))
-            return False, False, float('inf'), -1.0
-
-        start_reason = self._start_gap_reason(prepared)
-        if start_reason:
-            cprint('WARN', '%s: 轨迹起点不安全: %s' % (tag, start_reason))
-            return False, False, float('inf'), -1.0
-
-        final_reason = self._final_fk_target_reason(prepared, expected_plan_xyz, tag)
-        if final_reason:
-            cprint('ERROR', '%s: 轨迹被拒绝: %s' % (tag, final_reason))
+        if not self._validate_direct_plan(prepared, tag, expected_plan_xyz):
             return False, False, float('inf'), -1.0
 
         client = self._get_execution_client()
         if client is None:
+            return False, False, float('inf'), -1.0
+
+        if not self._flush_execution_pipeline(tag):
+            return False, False, float('inf'), -1.0
+
+        # 清链/停稳会改变真实起点。发送前必须重新锚定、2ms 重采样并复验，
+        # 防止旧流排空后的起点差被底层解释成瞬时高速跳变。
+        prepared = self._prepare_plan_for_direct_execution(plan, time_scale=time_scale)
+        self._anchor_trajectory_to_current_state(prepared)
+        raw_jump_reason = self._large_joint_jump_reason(prepared)
+        if raw_jump_reason:
+            cprint('WARN', '%s: 清链后原始轨迹被拒绝: %s' % (tag, raw_jump_reason))
+            return False, False, float('inf'), -1.0
+        self._densify_trajectory_for_driver(prepared)
+        if not self._validate_direct_plan(prepared, tag, expected_plan_xyz):
             return False, False, float('inf'), -1.0
 
         traj_duration = self._trajectory_duration(prepared)
@@ -976,11 +1024,11 @@ class SquareDemoController:
 
         goal = FollowJointTrajectoryGoal()
         goal.trajectory = prepared.joint_trajectory
+        if tag in ('GRIND-CART', 'GRIND-ARC'):
+            self._notify_preview_review_passed()
         cprint('EXEC', '%s: direct action execute %.1fs轨迹, timeout %.1fs ...' %
                (tag, traj_duration, wait_timeout))
 
-        if not self._flush_execution_pipeline(tag):
-            return False, False, float('inf'), -1.0
         client.send_goal(goal)
         done = client.wait_for_result(rospy.Duration(wait_timeout))
         state = client.get_state() if done else GoalStatus.LOST
@@ -1160,8 +1208,8 @@ class SquareDemoController:
             arrived, err, sync_delay = self.execute_pose_target(
                 corner, wp_label, prefer_position_only=True)
 
-            # 等待驱动队列排空、关节状态稳定, 防止相邻轨迹数据混叠
-            rospy.sleep(0.5)
+            # 短暂让反馈刷新；真正的停稳/清链由下一段执行前门控负责。
+            rospy.sleep(POST_SEGMENT_SETTLE)
 
             # 读取当前实际位姿, 与 TUI/示教器显示保持同源。
             display_pose = self.get_current_display_pose_teach()
@@ -1840,6 +1888,15 @@ class SquareDemoController:
 
         cprint('INFO', '')
 
+    def _notify_preview_review_passed(self):
+        callback = getattr(self, 'preview_review_passed_callback', None)
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception as exc:
+            cprint('WARN', 'TUI 预演审查弹窗通知失败: %s' % exc)
+
     # ============================================================
     # [5] 预设工件打磨测试
     # ============================================================
@@ -1847,8 +1904,8 @@ class SquareDemoController:
         """执行内置 3 点工件打磨测试轨迹 (示教器坐标系)。
 
         先以固定工具姿态到达第一个点上方的接近点，再执行固定姿态直线段。
-        直线结束后抬高 gap，转移到圆弧起点上方，下探到圆弧起点，最后执行
-        按示教 6D 点拟合/补密后的圆弧循迹。
+        直线结束后抬高 gap，转移到圆弧起点上方，下探到圆弧起点，执行
+        按示教 6D 点拟合/补密后的圆弧循迹，最后沿圆弧终点姿态垂直抬升。
         """
         cprint('EXEC', '>>> 预设工件打磨测试 — 直线 + 抬升 + 圆弧循迹 <<<')
         if not self._flush_execution_pipeline('GRIND-PRECHECK'):
@@ -1896,7 +1953,7 @@ class SquareDemoController:
                     cprint('WARN', '%s 未达 | 误差=%.3fm | 延迟=%.3fs' %
                            (label, err, sync_delay))
                     break
-                rospy.sleep(0.3)
+                rospy.sleep(POST_SEGMENT_SETTLE)
 
             if ok_count == len(GRINDING_TEST_WAYPOINTS):
                 cprint('OK', '直线打磨段逐点降级完成 %d/%d' %
@@ -1922,7 +1979,7 @@ class SquareDemoController:
             cprint('WARN', '打磨 gap 抬升未到达，取消圆弧循迹 | 误差=%.3fm | 延迟=%.3fs' %
                    (err, sync_delay))
             return False
-        rospy.sleep(0.5)
+        rospy.sleep(GRINDING_TRANSITION_SETTLE)
 
         arc_start = GRINDING_ARC_POSES[0]
         arc_start_position = arc_start[:3]
@@ -1943,7 +2000,7 @@ class SquareDemoController:
             cprint('WARN', '圆弧起点上方 gap 位未到达，取消圆弧循迹 | 误差=%.3fm | 延迟=%.3fs' %
                    (err, sync_delay))
             return False
-        rospy.sleep(0.5)
+        rospy.sleep(GRINDING_TRANSITION_SETTLE)
 
         cprint('INFO', '下探到圆弧起点: (%.4f, %.4f, %.4f)' %
                arc_start_position)
@@ -1966,7 +2023,26 @@ class SquareDemoController:
             orientation_tolerance=GRINDING_ORI_TOL,
             time_scale=GRINDING_ARC_TIME_SCALE)
         if arrived:
-            cprint('OK', '预设工件打磨测试结束 | 直线 + gap + 圆弧循迹完成')
+            arc_end = GRINDING_ARC_POSES[-1]
+            arc_end_orientation = rpy_to_quat(*arc_end[3:])
+            arc_lift_target = (
+                arc_end[0],
+                arc_end[1],
+                arc_end[2] + GRINDING_ARC_EXIT_LIFT)
+            cprint('INFO', '圆弧结束后垂直抬升 %.2fm 到: (%.4f, %.4f, %.4f)' %
+                   ((GRINDING_ARC_EXIT_LIFT,) + arc_lift_target))
+            arrived, err, sync_delay = self.execute_cartesian_waypoint_path(
+                [arc_lift_target], 'GRIND-ARC-LIFT',
+                orientation=arc_end_orientation,
+                orientation_desc='圆弧终点姿态 + 垂直抬升',
+                orientation_tolerance=GRINDING_ORI_TOL,
+                time_scale=GRINDING_ARC_TIME_SCALE)
+            if not arrived:
+                cprint('WARN', '圆弧结束抬升未完成 | 误差=%.3fm | 延迟=%.3fs' %
+                       (err, sync_delay))
+                return False
+
+            cprint('OK', '预设工件打磨测试结束')
             return True
 
         cprint('WARN', '圆弧循迹未完成 | 误差=%.3fm | 延迟=%.3fs' %
@@ -1990,7 +2066,7 @@ class SquareDemoController:
 
             arrived, err, sync_delay = self.execute_pose_target(
                 wp, wp_label, prefer_position_only=True)
-            rospy.sleep(0.5)
+            rospy.sleep(POST_SEGMENT_SETTLE)
 
             display_pose = self.get_current_display_pose_teach()
             if display_pose:

@@ -142,7 +142,7 @@
         pkg="aubo_linked_execution" type="safety_monitor.py"
         name="safety_monitor" output="screen">
     <param name="large_motion_threshold" value="0.5"/>
-    <param name="trajectory_start_tolerance" value="0.15"/>
+    <param name="trajectory_start_tolerance" value="0.05"/>
     <param name="manual_movement_threshold" value="0.05"/>
   </node>
 
@@ -177,7 +177,7 @@
         name="linked_execution_action_server" output="screen">
     <param name="real_server_wait_timeout" value="30.0"/>
     <param name="safety_watchdog_timeout" value="5.0"/>
-    <param name="trajectory_start_tolerance" value="0.15"/>
+    <param name="trajectory_start_tolerance" value="0.05"/>
     <param name="joint_jump_threshold" value="0.35"/>
     <param name="max_retime_scale" value="6.0"/>
     <param name="simulator_sample_dt" value="0.002"/>

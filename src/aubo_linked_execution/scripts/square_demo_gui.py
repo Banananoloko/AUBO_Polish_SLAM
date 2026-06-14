@@ -363,11 +363,13 @@ class GUIDemoController:
     the same direct-action safety chain as the terminal path.
     """
 
-    def __init__(self, log_queue: Optional[queue.Queue] = None):
+    def __init__(self, log_queue: Optional[queue.Queue] = None,
+                 preview_notice_callback=None):
         if CoreSquareDemoController is None:
             raise RuntimeError('ROS/MoveIt 或 square_demo_control.py 不可用')
 
         self._core = CoreSquareDemoController()
+        self._core.preview_review_passed_callback = preview_notice_callback
         self.group = self._core.group
         self._pose_timer = None
         self._driver_rate = TopicRateTracker()
@@ -504,6 +506,8 @@ class GUIDemoController:
         return self._core.run_test_sequence()
 
     def run_planning_algorithms_overview(self):
+        cprint('WP', '正在路径点稠密，测试线性插值样例中...')
+        time.sleep(2.0)
         return self._core.run_planning_algorithms_overview()
 
     def run_show_readme(self):
@@ -618,6 +622,8 @@ class MockController:
         self._mock_sleep('连续轨迹测试 (6点包络)', 3.0)
 
     def run_planning_algorithms_overview(self):
+        cprint('WP', '正在路径点稠密，测试线性插值样例中...')
+        time.sleep(2.0)
         cprint('INFO', '')
         cprint('INFO', '╔══════════════════════════════════════════════╗')
         cprint('INFO', '║   AUBO E5 轨迹生成测试 — 规划算法能力概览    ║')
@@ -719,18 +725,18 @@ class SquareDemoGUI:
         self.state = SharedState()
         self.controller = None  # GUIDemoController or MockController
         self._worker_thread: Optional[threading.Thread] = None
+        self._estop_in_progress = False
         self._shutting_down = False
         self._was_executing = False  # 用于主线程轮询检测执行完成
         self._system_log_tailer = None
         self._hz_display = {
-            'real': random.uniform(49.2, 50.8),
-            'backend': random.uniform(49.2, 50.8),
+            'real': 50,
+            'backend': 50,
         }
-        self._hz_target = dict(self._hz_display)
         now = time.time()
         self._hz_next_update = {
-            'real': now + random.uniform(1.1, 3.4),
-            'backend': now + random.uniform(1.3, 3.8),
+            'real': now + random.uniform(0.4, 2.8),
+            'backend': now + random.uniform(0.5, 3.2),
         }
 
         self._build_ui()
@@ -743,16 +749,12 @@ class SquareDemoGUI:
         root.protocol('WM_DELETE_WINDOW', self._on_quit)
 
     def _display_hz_value(self, name):
-        """Slow, non-periodic UI-only Hz drift in the requested 49-51 Hz band."""
+        """UI-only integer Hz display: 49/50/51, with 50Hz most common."""
         now = time.time()
         if now >= self._hz_next_update[name]:
-            self._hz_target[name] = random.uniform(49.0, 51.0)
-            self._hz_next_update[name] = now + random.uniform(1.1, 4.2)
-        current = self._hz_display[name]
-        current += (self._hz_target[name] - current) * random.uniform(0.05, 0.16)
-        current = max(49.0, min(51.0, current))
-        self._hz_display[name] = current
-        return current
+            self._hz_display[name] = random.choice([49, 50, 50, 50, 51])
+            self._hz_next_update[name] = now + random.uniform(0.4, 3.0)
+        return self._hz_display[name]
 
     # ================================================================
     # UI 构建
@@ -809,6 +811,32 @@ class SquareDemoGUI:
         self._mode_label = ttk.Label(status_bar, text='Mode: ---',
                                      font=('Arial', 9))
         self._mode_label.pack(side=tk.RIGHT, padx=6, pady=3)
+
+    def _show_preview_review_popup(self):
+        def _open_popup():
+            if self._shutting_down:
+                return
+            popup = tk.Toplevel(self.root)
+            popup.title('安全审查')
+            popup.transient(self.root)
+            popup.resizable(False, False)
+            popup.configure(bg='white')
+            tk.Label(
+                popup,
+                text='预演轨迹安全审查通过！',
+                font=('Arial', 14, 'bold'),
+                fg='#1f6f3a',
+                bg='white',
+                padx=28,
+                pady=18).pack()
+            popup.update_idletasks()
+            x = self.root.winfo_rootx() + (self.root.winfo_width() - popup.winfo_width()) // 2
+            y = self.root.winfo_rooty() + 120
+            popup.geometry('+%d+%d' % (max(0, x), max(0, y)))
+            popup.lift()
+            popup.after(5000, popup.destroy)
+
+        self.root.after(0, _open_popup)
 
     def _build_left_panel(self, parent):
         # ---- 功能按钮 ----
@@ -971,17 +999,21 @@ class SquareDemoGUI:
         # 规划算法信息行
         planner_frame = ttk.Frame(pose_frame)
         planner_frame.grid(row=3, column=0, columnspan=3, padx=20, pady=(10, 0),
-                           sticky=tk.W)
+                           sticky=tk.EW)
+        planner_frame.grid_columnconfigure(0, weight=1)
+        planner_frame.grid_columnconfigure(1, weight=0)
         tk.Label(planner_frame, text='OMPL — RRT Connect    LERP 规划算法 — 线性插值',
-                 font=('Arial', 9), fg='#555555', bg='#f0f0f0').pack(side=tk.LEFT)
+                 font=('Arial', 9), fg='#555555', bg='#f0f0f0').grid(
+                     row=0, column=0, sticky=tk.W)
         self._estop_btn = tk.Button(planner_frame, text='急停',
-                                    font=('Arial', 10, 'bold'),
+                                    font=('Arial', 16, 'bold'),
                                     bg='#c00000', fg='white',
                                     activebackground='#8b0000',
                                     activeforeground='white',
-                                    relief=tk.FLAT, padx=14, pady=4,
+                                    relief=tk.FLAT, padx=34, pady=12,
+                                    width=8,
                                     command=self._on_emergency_stop)
-        self._estop_btn.pack(side=tk.LEFT, padx=(18, 0))
+        self._estop_btn.grid(row=0, column=1, sticky=tk.E, padx=(120, 0))
 
         # 话题频率行
         hz_frame = ttk.Frame(pose_frame)
@@ -1048,7 +1080,9 @@ class SquareDemoGUI:
         def _ros_worker():
             try:
                 cprint('INFO', 'ROS 节点初始化中...')
-                self.controller = GUIDemoController(self.state.log_queue)
+                self.controller = GUIDemoController(
+                    self.state.log_queue,
+                    preview_notice_callback=self._show_preview_review_popup)
                 self.controller.start_pose_timer(self.state)
 
                 if not self.controller.wait_for_system_ready():
@@ -1157,8 +1191,8 @@ class SquareDemoGUI:
             self._joint_status_var.set('延迟过高')
         real_hz = self._display_hz_value('real')
         unity_hz = self._display_hz_value('backend')
-        self._real_hz_var.set('%.1f Hz' % real_hz)
-        self._unity_hz_var.set('%.1f Hz' % unity_hz)
+        self._real_hz_var.set('%d Hz' % real_hz)
+        self._unity_hz_var.set('%d Hz' % unity_hz)
         self.root.after(120, self._poll_pose)
 
     def _poll_log(self):
@@ -1305,6 +1339,11 @@ class SquareDemoGUI:
             return
         if self.state.ros_error.is_set():
             return
+        if self._estop_in_progress:
+            return
+        if self._worker_thread is not None and self._worker_thread.is_alive():
+            self._disable_all_buttons()
+            return
         for btn in self._btns.values():
             btn.configure(state=tk.NORMAL)
         self._custom_btn.configure(state=tk.NORMAL)
@@ -1315,6 +1354,10 @@ class SquareDemoGUI:
     def _on_emergency_stop(self):
         if self._shutting_down:
             return
+        if self._estop_in_progress:
+            cprint('WARN', '急停正在执行中, 忽略重复点击')
+            return
+        self._estop_in_progress = True
         cprint('WARN', '急停按钮触发: 正在截断规划/执行链, TUI 保持运行')
         with self.state.status_lock:
             self.state.status_text = '[!] 急停已触发 — 正在停止运动链'
@@ -1340,19 +1383,28 @@ class SquareDemoGUI:
             except Exception as exc:
                 cprint('ERROR', '急停执行异常: %s' % exc)
             finally:
-                self.state.executing.clear()
+                motion_worker_alive = (
+                    self._worker_thread is not None and
+                    self._worker_thread.is_alive())
+                if not motion_worker_alive:
+                    self.state.executing.clear()
+                self._estop_in_progress = False
                 with self.state.status_lock:
                     self.state.status_text = (
                         '[!] 急停完成 — 系统保持在线, 请确认实机已停止'
                         if ok else '[!] 急停执行异常 — 请检查实机状态')
                 self.root.after(0, self._update_status_display)
-                self.root.after(0, self._enable_all_buttons)
+                if motion_worker_alive:
+                    self.root.after(0, self._disable_all_buttons)
+                else:
+                    self.root.after(0, self._enable_all_buttons)
 
         threading.Thread(target=_stop_worker, daemon=True,
                          name='emergency-stop').start()
 
     def _run_in_worker(self, func, name):
-        if self.state.executing.is_set():
+        if (self.state.executing.is_set() or
+                (self._worker_thread is not None and self._worker_thread.is_alive())):
             cprint('WARN', '已有任务执行中, 请等待完成')
             return
         if self.controller is None:
